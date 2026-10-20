@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Next.js build
+.next/
+out/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Node/TypeScript outputs
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test and debug outputs
+coverage/
+*.pdf
+*.docx
+eng.traineddata
+
+# OS artifacts
+.DS_Store
+Thumbs.db

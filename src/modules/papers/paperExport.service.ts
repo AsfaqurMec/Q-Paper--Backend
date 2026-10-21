@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import PDFDocument from "pdfkit";
+
+const safeDirname = typeof __dirname !== "undefined" ? __dirname : process.cwd();
 import {
   AlignmentType,
   BorderStyle,
@@ -40,7 +42,7 @@ function getMathFontPath(): { regular: string; bold: string } | null {
   const candidates = [
     { regular: path.resolve(process.cwd(), "assets/fonts/seguisym.ttf"), bold: path.resolve(process.cwd(), "assets/fonts/seguisym.ttf") },
     { regular: path.resolve(process.cwd(), "backend/assets/fonts/seguisym.ttf"), bold: path.resolve(process.cwd(), "backend/assets/fonts/seguisym.ttf") },
-    { regular: path.resolve(__dirname, "../../assets/fonts/seguisym.ttf"), bold: path.resolve(__dirname, "../../assets/fonts/seguisym.ttf") },
+    { regular: path.resolve(safeDirname, "../../assets/fonts/seguisym.ttf"), bold: path.resolve(safeDirname, "../../assets/fonts/seguisym.ttf") },
     { regular: "C:\\Windows\\Fonts\\seguisym.ttf", bold: "C:\\Windows\\Fonts\\seguisym.ttf" },
     { regular: "C:\\Windows\\Fonts\\calibri.ttf", bold: "C:\\Windows\\Fonts\\calibrib.ttf" },
     { regular: "C:\\Windows\\Fonts\\segoeui.ttf", bold: "C:\\Windows\\Fonts\\segoeuib.ttf" },
@@ -64,7 +66,7 @@ function getBanglaFontPath(): string | null {
   const candidates = [
     path.resolve(process.cwd(), "assets/fonts/kalpurush.ttf"),
     path.resolve(process.cwd(), "backend/assets/fonts/kalpurush.ttf"),
-    path.resolve(__dirname, "../../assets/fonts/kalpurush.ttf"),
+    path.resolve(safeDirname, "../../assets/fonts/kalpurush.ttf"),
     "C:\\Windows\\Fonts\\kalpurush.ttf"
   ];
   for (const candidate of candidates) {
@@ -73,7 +75,72 @@ function getBanglaFontPath(): string | null {
   return null;
 }
 
-export async function renderPaperPdf(paper: Paper, options?: { withAnswer?: boolean }) {
+export function createSetPaper(basePaper: Paper, setKey: string): Paper {
+  const banglaToEnglishSet: Record<string, string> = { "ক": "A", "খ": "B", "গ": "C", "ঘ": "D" };
+  const rawKey = (setKey || "").trim();
+  const normalizedKey = banglaToEnglishSet[rawKey] || rawKey.toUpperCase() || "A";
+
+  const paper: Paper = JSON.parse(JSON.stringify(basePaper));
+  paper.setName = normalizedKey;
+
+  const mcqs = (paper.questions || []).filter((q) => (q.type || "mcq") === "mcq");
+  const cqs = (paper.questions || []).filter((q) => q.type === "cq");
+
+  const isBangla =
+    /[\u0980-\u09FF]/.test(paper.name + paper.subject) ||
+    !paper.subject?.toLowerCase().includes("english");
+  const toBn = (n: number) =>
+    n.toString().replace(/[0-9]/g, (d) => ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"][Number(d)]);
+
+  if (mcqs.length > 1) {
+    if (normalizedKey !== "A" && normalizedKey !== "1" && normalizedKey !== "ORIGINAL") {
+      const seedStr = `${paper.id}_set_${normalizedKey}`;
+      let seed = 0;
+      for (let i = 0; i < seedStr.length; i++) {
+        seed = (seed * 31 + seedStr.charCodeAt(i)) >>> 0;
+      }
+      const pseudoRand = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+
+      const shuffledMcqs = [...mcqs];
+      for (let i = shuffledMcqs.length - 1; i > 0; i--) {
+        const j = Math.floor(pseudoRand() * (i + 1));
+        [shuffledMcqs[i], shuffledMcqs[j]] = [shuffledMcqs[j], shuffledMcqs[i]];
+      }
+
+      const numberedMcqs = shuffledMcqs.map((q, idx) => ({
+        ...q,
+        number: isBangla ? toBn(idx + 1) : String(idx + 1)
+      }));
+
+      paper.questions = [...numberedMcqs, ...cqs];
+    } else {
+      // Set A: maintain original order, ensure clean sequential numbering
+      const numberedMcqs = mcqs.map((q, idx) => ({
+        ...q,
+        number: isBangla ? toBn(idx + 1) : String(idx + 1)
+      }));
+
+      paper.questions = [...numberedMcqs, ...cqs];
+    }
+  } else {
+    // Single question or CQ only
+    const numberedQuestions = (paper.questions || []).map((q, idx) => ({
+      ...q,
+      number: q.number && q.number.trim() ? q.number.trim() : (isBangla ? toBn(idx + 1) : String(idx + 1))
+    }));
+    paper.questions = numberedQuestions;
+  }
+
+  return paper;
+}
+
+export async function renderPaperPdf(
+  paper: Paper,
+  options?: { withAnswer?: boolean; allSets?: boolean }
+) {
   const images = await loadQuestionImages(paper);
   const doc = new PDFDocument({
     size: "A4",
@@ -100,17 +167,35 @@ export async function renderPaperPdf(paper: Paper, options?: { withAnswer?: bool
     doc.registerFont("BanglaFont-Bold", banglaFont);
   }
 
-  const headerEndY = drawHeader(doc, paper, Boolean(banglaFont));
-  drawQuestions(doc, paper, images, Boolean(banglaFont), headerEndY);
-  if (options?.withAnswer !== false) {
-    drawAnswers(doc, paper, Boolean(banglaFont));
+  if (options?.allSets) {
+    const setKeys = ["A", "B", "C", "D"];
+    for (let sIdx = 0; sIdx < setKeys.length; sIdx++) {
+      const sKey = setKeys[sIdx];
+      const setPaper = createSetPaper(paper, sKey);
+      if (sIdx > 0) {
+        doc.addPage();
+      }
+      const headerEndY = drawHeader(doc, setPaper, Boolean(banglaFont));
+      drawQuestions(doc, setPaper, images, Boolean(banglaFont), headerEndY);
+      if (options?.withAnswer !== false) {
+        drawAnswers(doc, setPaper, Boolean(banglaFont));
+      }
+    }
+  } else {
+    const headerEndY = drawHeader(doc, paper, Boolean(banglaFont));
+    drawQuestions(doc, paper, images, Boolean(banglaFont), headerEndY);
+    if (options?.withAnswer !== false) {
+      drawAnswers(doc, paper, Boolean(banglaFont));
+    }
   }
+
   doc.end();
 
   return new Promise<Buffer>((resolve) => {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
   });
 }
+
 
 type FractionItem = {
   type: "fraction";
@@ -1793,8 +1878,12 @@ function docxSectionHeadline(title: string, instructions?: string): Paragraph[] 
   return p;
 }
 
-export async function renderPaperDocx(paper: Paper, options?: { withAnswer?: boolean }) {
-  const images = await loadQuestionImages(paper);
+function buildDocxBodyForPaper(
+  paper: Paper,
+  images: ImageMap,
+  options?: { withAnswer?: boolean },
+  isFirstPaper = true
+): Array<Paragraph | Table> {
   const cleanName = formatMathForExport(paper.name);
   const cleanInstructions = paper.instructions ? formatMathForExport(paper.instructions) : "";
   const isSplit = paper.layout === "split";
@@ -1829,6 +1918,7 @@ export async function renderPaperDocx(paper: Paper, options?: { withAnswer?: boo
 
   // Header
   const headerChildren: Paragraph[] = [
+    ...(isFirstPaper ? [] : [new Paragraph({ text: "", pageBreakBefore: true })]),
     paragraph(titleWithSet, { bold: true, size: 32, center: true, spacing: { after: 60 } }),
     paragraph(`${paper.className}    ${paper.subject}    Time: ${paper.duration}    Marks: ${paper.totalMarks}`, {
       center: true,
@@ -1968,6 +2058,28 @@ export async function renderPaperDocx(paper: Paper, options?: { withAnswer?: boo
     });
   }
 
+  return bodyChildren;
+}
+
+export async function renderPaperDocx(
+  paper: Paper,
+  options?: { withAnswer?: boolean; allSets?: boolean }
+) {
+  const images = await loadQuestionImages(paper);
+  const bodyChildren: Array<Paragraph | Table> = [];
+
+  if (options?.allSets) {
+    const setKeys = ["A", "B", "C", "D"];
+    for (let sIdx = 0; sIdx < setKeys.length; sIdx++) {
+      const sKey = setKeys[sIdx];
+      const setPaper = createSetPaper(paper, sKey);
+      const setChildren = buildDocxBodyForPaper(setPaper, images, options, sIdx === 0);
+      bodyChildren.push(...setChildren);
+    }
+  } else {
+    bodyChildren.push(...buildDocxBodyForPaper(paper, images, options, true));
+  }
+
   const document = new Document({
     styles: {
       default: {
@@ -1986,7 +2098,7 @@ export async function renderPaperDocx(paper: Paper, options?: { withAnswer?: boo
       {
         properties: {
           page: {
-            margin: { top: 720, bottom: 720, left: 720, right: 720 } // Reduced margins: 0.5 in
+            margin: { top: 720, bottom: 720, left: 720, right: 720 }
           }
         },
         children: bodyChildren
@@ -2231,13 +2343,46 @@ async function loadQuestionImages(paper: Paper) {
     paper.questions.map(async (question) => {
       if (!question.imageUrl) return;
       try {
-        const response = await fetch(question.imageUrl);
-        if (!response.ok) return;
-        const buffer = Buffer.from(await response.arrayBuffer());
-        const size = readImageSize(buffer);
-        if (size) images.set(question.id, { buffer, ...size });
+        let buffer: Buffer | null = null;
+        const trimmed = question.imageUrl.trim();
+
+        if (trimmed.startsWith("data:")) {
+          const marker = ";base64,";
+          const markerIdx = trimmed.indexOf(marker);
+          if (markerIdx !== -1) {
+            buffer = Buffer.from(trimmed.slice(markerIdx + marker.length), "base64");
+          }
+        } else {
+          let url = trimmed;
+          if (url.startsWith("/")) {
+            const baseUrl =
+              process.env.SERVER_URL ||
+              process.env.RENDER_EXTERNAL_URL ||
+              `http://127.0.0.1:${process.env.PORT || 5000}`;
+            url = `${baseUrl.replace(/\/+$/, "")}${url}`;
+          }
+
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3000);
+          try {
+            const response = await fetch(url, {
+              signal: controller.signal,
+              headers: { "User-Agent": "ExamCraft-Export/1.0" }
+            });
+            if (response.ok) {
+              buffer = Buffer.from(await response.arrayBuffer());
+            }
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+
+        if (buffer && buffer.length > 0) {
+          const size = readImageSize(buffer);
+          if (size) images.set(question.id, { buffer, ...size });
+        }
       } catch {
-        // Export should still work if a remote image is temporarily unavailable.
+        // Export should still work smoothly if a remote image is temporarily unavailable.
       }
     })
   );

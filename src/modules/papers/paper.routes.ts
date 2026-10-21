@@ -4,7 +4,7 @@ import { ApiError, asyncHandler, ok, validate } from "../../utils/http.js";
 import { nanoid } from "nanoid";
 import { createPaper, deletePaper, duplicatePaper, getPaper, listPapers, setStatus, updatePaper, updatePaperQuestions } from "./paper.service.js";
 import { createPaperSchema, paperStatusSchema } from "./paper.schemas.js";
-import { renderPaperDocx, renderPaperPdf } from "./paperExport.service.js";
+import { createSetPaper, renderPaperDocx, renderPaperPdf } from "./paperExport.service.js";
 import { QuestionBankItemModel } from "../question-bank/questionBank.models.js";
 import type { Paper } from "../shared/types.js";
 
@@ -147,59 +147,28 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
     paper.questionsPerPage = Number(req.query.questionsPerPage);
   }
 
-  const banglaToEnglishSet: Record<string, string> = { "ক": "A", "খ": "B", "গ": "C", "ঘ": "D" };
   const rawSet = req.query.set ? String(req.query.set).trim() : (paper.setName ? String(paper.setName).trim() : "");
+  const isAllSets = rawSet.toLowerCase() === "all";
 
-  if (rawSet) {
-    const normalizedKey = banglaToEnglishSet[rawSet] || rawSet.toUpperCase();
-    paper.setName = normalizedKey;
+  let preparedPaper = paper;
+  let fileSuffix = "";
 
-    // Deterministically shuffle MCQs based on paper.id + normalizedKey
-    const mcqs = (paper.questions || []).filter((q) => (q.type || "mcq") === "mcq");
-    const cqs = (paper.questions || []).filter((q) => q.type === "cq");
-
+  if (isAllSets) {
+    fileSuffix = "-All-Sets";
+  } else if (rawSet && rawSet.toLowerCase() !== "none" && rawSet.toLowerCase() !== "original") {
+    preparedPaper = createSetPaper(paper, rawSet);
+    fileSuffix = `-Set-${preparedPaper.setName}`;
+  } else {
+    // Ensure clean sequential numbering
     const isBangla = /[\u0980-\u09FF]/.test(paper.name + paper.subject) || !paper.subject?.toLowerCase().includes("english");
     const toBn = (n: number) => n.toString().replace(/[0-9]/g, (d) => ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"][Number(d)]);
-
-    if (mcqs.length > 1) {
-      if (normalizedKey !== "A" && normalizedKey !== "1" && normalizedKey !== "ORIGINAL") {
-        const seedStr = `${paper.id}_set_${normalizedKey}`;
-        let seed = 0;
-        for (let i = 0; i < seedStr.length; i++) {
-          seed = (seed * 31 + seedStr.charCodeAt(i)) >>> 0;
-        }
-        const pseudoRand = () => {
-          seed = (seed * 1664525 + 1013904223) >>> 0;
-          return seed / 4294967296;
-        };
-
-        const shuffledMcqs = [...mcqs];
-        for (let i = shuffledMcqs.length - 1; i > 0; i--) {
-          const j = Math.floor(pseudoRand() * (i + 1));
-          [shuffledMcqs[i], shuffledMcqs[j]] = [shuffledMcqs[j], shuffledMcqs[i]];
-        }
-
-        const numberedMcqs = shuffledMcqs.map((q, idx) => ({
-          ...q,
-          number: isBangla ? toBn(idx + 1) : String(idx + 1)
-        }));
-
-        paper.questions = [...numberedMcqs, ...cqs];
-      } else {
-        // Set A: maintain original order, ensure clean sequential numbering
-        const numberedMcqs = mcqs.map((q, idx) => ({
-          ...q,
-          number: isBangla ? toBn(idx + 1) : String(idx + 1)
-        }));
-
-        paper.questions = [...numberedMcqs, ...cqs];
-      }
-    }
+    preparedPaper.questions = (preparedPaper.questions || []).map((q, idx) => ({
+      ...q,
+      number: q.number && q.number.trim() ? q.number.trim() : (isBangla ? toBn(idx + 1) : String(idx + 1))
+    }));
   }
 
   const format = String(req.params.format).toLowerCase();
-  const fileSuffix = paper.setName ? `-Set-${paper.setName}` : "";
-
   const withAnswerParam = req.query.withAnswer !== undefined ? String(req.query.withAnswer).trim().toLowerCase() : undefined;
   const withAnswer = withAnswerParam !== undefined
     ? (withAnswerParam === "true" || withAnswerParam === "1" || withAnswerParam === "yes" || withAnswerParam === "with")
@@ -209,16 +178,16 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
     : "";
 
   if (format === "docx") {
-    if (req.user!.plan !== "ultra") {
-      throw new ApiError(403, "DOCX export is only available in the Ultra package. Please upgrade to Ultra.");
+    if (req.user!.plan !== "ultra" && req.user!.plan !== "diamond" && req.user!.role !== "admin") {
+      throw new ApiError(403, "DOCX export is only available in the Ultra and Diamond packages. Please upgrade your plan.");
     }
-    const file = await renderPaperDocx(paper, { withAnswer });
+    const file = await renderPaperDocx(preparedPaper, { withAnswer, allSets: isAllSets });
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", `attachment; filename="${safeFileName(paper.name)}${fileSuffix}${answerSuffix}.docx"`);
     return res.send(file);
   }
   if (format === "pdf") {
-    const file = await renderPaperPdf(paper, { withAnswer });
+    const file = await renderPaperPdf(preparedPaper, { withAnswer, allSets: isAllSets });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${safeFileName(paper.name)}${fileSuffix}${answerSuffix}.pdf"`);
     return res.send(file);

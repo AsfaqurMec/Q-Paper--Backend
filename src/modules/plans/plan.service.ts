@@ -100,10 +100,15 @@ export const plans: Plan[] = [
   }
 ];
 
+let cachedPlans: Plan[] = plans;
+
 export function getPlan(code: PlanCode | string): Plan {
   // Alias legacy "standard" to "small"
-  if (code === "standard") return plans[1];
-  return plans.find((plan) => plan.code === code) ?? plans[0];
+  if (code === "standard") {
+    const s = cachedPlans.find((p) => p.code === "small");
+    if (s) return s;
+  }
+  return cachedPlans.find((plan) => plan.code === code) ?? cachedPlans[0] ?? plans[0];
 }
 
 export type PlanUsageAssertion = {
@@ -185,7 +190,7 @@ export async function getDbPlans(): Promise<Plan[]> {
     const dbPlans = await PlanModel.find({ code: { $in: ["free", "small", "pro", "ultra", "diamond"] } }).lean();
     if (dbPlans && dbPlans.length >= 4) {
       const order = ["free", "small", "pro", "ultra", "diamond"];
-      return dbPlans
+      const loaded = dbPlans
         .sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code))
         .map((p) => ({
           code: p.code,
@@ -203,9 +208,11 @@ export async function getDbPlans(): Promise<Plan[]> {
           randomGenerator: p.randomGenerator ?? true,
           multipleVersions: p.multipleVersions ?? true
         }));
+      cachedPlans = loaded;
+      return loaded;
     }
   } catch (error) {
     console.error("Failed to read plans from DB, falling back to static plans:", error);
   }
-  return plans;
+  return cachedPlans;
 }

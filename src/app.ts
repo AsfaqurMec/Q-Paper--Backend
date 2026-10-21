@@ -27,6 +27,7 @@ app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 applySecurity(app);
 
 app.get("/health", (_req, res) => res.json({ status: "ok", service: "examcraft-api" }));
+app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "examcraft-api" }));
 app.use("/api/auth", authRouter);
 app.use("/api/plans", planRouter);
 app.use("/api/dashboard", dashboardRouter);

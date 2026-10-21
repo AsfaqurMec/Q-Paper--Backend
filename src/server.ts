@@ -2,6 +2,7 @@ import { connectDatabase } from "./config/database.js";
 import { env } from "./config/env.js";
 import { app } from "./app.js";
 import { deleteExpiredPapers } from "./modules/papers/paper.service.js";
+import { startKeepAlive } from "./services/keepAlive.js";
 
 async function bootstrap() {
   await connectDatabase();
@@ -14,6 +15,7 @@ async function bootstrap() {
 
   app.listen(env.PORT, () => {
     console.log(`ExamCraft API running on http://localhost:${env.PORT}`);
+    startKeepAlive();
   });
 }
 

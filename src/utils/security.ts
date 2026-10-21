@@ -93,12 +93,13 @@ export function sanitizeSvg(svgContent: string): string {
     },
     disallowedTagsMode: "discard",
     transformTags: {
-      svg: (tagName, attribs) => {
+      svg: (tagName: string, attribs: Record<string, string>) => {
         // Strip out any event handler or javascript URI
         const cleanAttribs: Record<string, string> = {};
         for (const [key, val] of Object.entries(attribs)) {
-          if (!key.toLowerCase().startsWith("on") && !val.toLowerCase().startsWith("javascript:")) {
-            cleanAttribs[key] = val;
+          const stringVal = String(val ?? "");
+          if (!key.toLowerCase().startsWith("on") && !stringVal.toLowerCase().startsWith("javascript:")) {
+            cleanAttribs[key] = stringVal;
           }
         }
         return { tagName, attribs: cleanAttribs };

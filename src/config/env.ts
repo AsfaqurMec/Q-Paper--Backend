@@ -27,7 +27,19 @@ const envSchema = z.object({
   PARSER_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(3),
   PARSER_VERIFICATION_ENABLED: z.coerce.boolean().default(true),
   PARSER_DEBUG: z.coerce.boolean().default(false),
-  OPENAI_API_KEY: z.string().optional()
+  OPENAI_API_KEY: z.string().optional(),
+  SERVER_URL: z.string().optional(),
+  RENDER_EXTERNAL_URL: z.string().optional(),
+  KEEP_ALIVE_ENABLED: z
+    .preprocess((val) => {
+      if (typeof val === "string") {
+        const lower = val.toLowerCase().trim();
+        if (lower === "false" || lower === "0" || lower === "off") return false;
+      }
+      return val;
+    }, z.coerce.boolean())
+    .default(true),
+  KEEP_ALIVE_INTERVAL_MINUTES: z.coerce.number().default(10)
 });
 
 import { isPlaceholderSecret } from "../utils/security.js";

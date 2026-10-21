@@ -83,16 +83,22 @@ export function createSetPaper(basePaper: Paper, setKey: string): Paper {
   const paper: Paper = JSON.parse(JSON.stringify(basePaper));
   paper.setName = normalizedKey;
 
-  const mcqs = (paper.questions || []).filter((q) => (q.type || "mcq") === "mcq");
-  const cqs = (paper.questions || []).filter((q) => q.type === "cq");
-
   const isBangla =
     /[\u0980-\u09FF]/.test(paper.name + paper.subject) ||
     !paper.subject?.toLowerCase().includes("english");
   const toBn = (n: number) =>
     n.toString().replace(/[0-9]/g, (d) => ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"][Number(d)]);
 
+  const allQuestions = paper.questions || [];
+  const mcqs = allQuestions.filter((q) => (q.type || "mcq").toLowerCase().trim() === "mcq");
+  const cqs = allQuestions.filter((q) => (q.type || "").toLowerCase().trim() === "cq");
+  const others = allQuestions.filter((q) => {
+    const t = (q.type || "mcq").toLowerCase().trim();
+    return t !== "mcq" && t !== "cq";
+  });
+
   if (mcqs.length > 1) {
+    let shuffledMcqs = [...mcqs];
     if (normalizedKey !== "A" && normalizedKey !== "1" && normalizedKey !== "ORIGINAL") {
       const seedStr = `${paper.id}_set_${normalizedKey}`;
       let seed = 0;
@@ -104,30 +110,26 @@ export function createSetPaper(basePaper: Paper, setKey: string): Paper {
         return seed / 4294967296;
       };
 
-      const shuffledMcqs = [...mcqs];
       for (let i = shuffledMcqs.length - 1; i > 0; i--) {
         const j = Math.floor(pseudoRand() * (i + 1));
         [shuffledMcqs[i], shuffledMcqs[j]] = [shuffledMcqs[j], shuffledMcqs[i]];
       }
-
-      const numberedMcqs = shuffledMcqs.map((q, idx) => ({
-        ...q,
-        number: isBangla ? toBn(idx + 1) : String(idx + 1)
-      }));
-
-      paper.questions = [...numberedMcqs, ...cqs];
-    } else {
-      // Set A: maintain original order, ensure clean sequential numbering
-      const numberedMcqs = mcqs.map((q, idx) => ({
-        ...q,
-        number: isBangla ? toBn(idx + 1) : String(idx + 1)
-      }));
-
-      paper.questions = [...numberedMcqs, ...cqs];
     }
+
+    const numberedMcqs = shuffledMcqs.map((q, idx) => ({
+      ...q,
+      number: isBangla ? toBn(idx + 1) : String(idx + 1)
+    }));
+
+    const numberedCqs = cqs.map((q, cIdx) => ({
+      ...q,
+      number: q.number && q.number.trim() ? q.number.trim() : (isBangla ? toBn(numberedMcqs.length + cIdx + 1) : String(numberedMcqs.length + cIdx + 1))
+    }));
+
+    paper.questions = [...numberedMcqs, ...numberedCqs, ...others];
   } else {
     // Single question or CQ only
-    const numberedQuestions = (paper.questions || []).map((q, idx) => ({
+    const numberedQuestions = allQuestions.map((q, idx) => ({
       ...q,
       number: q.number && q.number.trim() ? q.number.trim() : (isBangla ? toBn(idx + 1) : String(idx + 1))
     }));
@@ -400,6 +402,11 @@ function measureInlineFraction(
   bold: boolean = false,
   hasBanglaFont: boolean = false
 ): number {
+  const cache = getDocCache(doc);
+  const fracKey = `f\0${whole || ""}\0${num}\0${den}\0${fontSize}\0${bold ? 1 : 0}\0${hasBanglaFont ? 1 : 0}`;
+  const cached = cache.tokenMeasureCache.get(fracKey);
+  if (cached !== undefined) return cached;
+
   const fracFontSize = Math.max(7, Math.round(fontSize * 0.72));
   let width = 0;
 
@@ -411,6 +418,7 @@ function measureInlineFraction(
   const denWidth = measureTokenizedString(doc, den || " ", fracFontSize, bold, hasBanglaFont);
 
   width += Math.max(numWidth, denWidth) + 6;
+  cache.tokenMeasureCache.set(fracKey, width);
   return width;
 }
 
@@ -616,7 +624,13 @@ function extractBalancedBraces(str: string, startIndex: number): { content: stri
   return null;
 }
 
+const globalParseMathCache = new Map<string, LayoutItem[]>();
+
 function parseTextWithMath(rawText: string): LayoutItem[] {
+  if (!rawText) return [];
+  const cached = globalParseMathCache.get(rawText);
+  if (cached) return cached;
+
   const text = convertBracketMatricesToLatex(rawText);
   const items: LayoutItem[] = [];
   let idx = 0;
@@ -718,6 +732,9 @@ function parseTextWithMath(rawText: string): LayoutItem[] {
     }
   }
 
+  if (globalParseMathCache.size < 5000) {
+    globalParseMathCache.set(rawText, items);
+  }
   return items;
 }
 
@@ -749,6 +766,43 @@ function getMathOpVerticalOffset(fontSize: number, hasBanglaFont: boolean): { si
   return { size: opFontSize, yOffset };
 }
 
+interface PdfRenderCache {
+  widthCache: Map<string, number>;
+  tokenMeasureCache: Map<string, number>;
+  parseMathCache: Map<string, LayoutItem[]>;
+  layoutCache: Map<string, Array<{ items: Array<LayoutItem & { width: number }>; totalWidth: number; lineHeight: number }>>;
+  measurePdfTextCache: Map<string, number>;
+}
+
+function getDocCache(doc: PDFKit.PDFDocument): PdfRenderCache {
+  let cache = (doc as any)._qpaperCache;
+  if (!cache) {
+    cache = {
+      widthCache: new Map<string, number>(),
+      tokenMeasureCache: new Map<string, number>(),
+      parseMathCache: new Map<string, LayoutItem[]>(),
+      layoutCache: new Map<string, Array<{ items: Array<LayoutItem & { width: number }>; totalWidth: number; lineHeight: number }>>(),
+      measurePdfTextCache: new Map<string, number>()
+    };
+    (doc as any)._qpaperCache = cache;
+  }
+  return cache;
+}
+
+function getCachedWidth(doc: PDFKit.PDFDocument, fontName: string, fontSize: number, text: string): number {
+  if (!text) return 0;
+  const cache = getDocCache(doc);
+  const key = `${fontName}\0${fontSize}\0${text}`;
+  let w = cache.widthCache.get(key);
+  if (w === undefined) {
+    doc.fontSize(fontSize);
+    doc.font(fontName);
+    w = doc.widthOfString(text);
+    cache.widthCache.set(key, w);
+  }
+  return w;
+}
+
 function measureTokenizedString(
   doc: PDFKit.PDFDocument,
   text: string,
@@ -756,6 +810,13 @@ function measureTokenizedString(
   bold: boolean,
   hasBanglaFont: boolean
 ): number {
+  if (!text) return 0;
+  const cache = getDocCache(doc);
+  const cacheKey = `${text}\0${fontSize}\0${bold ? 1 : 0}\0${hasBanglaFont ? 1 : 0}`;
+  const cached = cache.tokenMeasureCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  let result = 0;
   const isBangla = /[\u0964\u0965\u0980-\u09FF]/.test(text) && hasBanglaFont;
   const hasSpecialMath = NON_BANGLA_MATH_REGEX.test(text);
   NON_BANGLA_MATH_REGEX.lastIndex = 0;
@@ -763,29 +824,27 @@ function measureTokenizedString(
   if (!isBangla && !hasSpecialMath) {
     const isOp = isMathSymbolOrOperator(text);
     const { size } = isOp ? getMathOpVerticalOffset(fontSize, hasBanglaFont) : { size: fontSize };
-    doc.fontSize(size);
-    doc.font(bold ? "MathFont-Bold" : "MathFont");
-    return doc.widthOfString(text);
+    const fontName = bold ? "MathFont-Bold" : "MathFont";
+    result = getCachedWidth(doc, fontName, size, text);
+  } else if (!hasSpecialMath) {
+    const fontName = bold ? "BanglaFont-Bold" : "BanglaFont";
+    result = getCachedWidth(doc, fontName, fontSize, text);
+  } else {
+    const tokens = text.split(NON_BANGLA_MATH_REGEX).filter(Boolean);
+    let w = 0;
+    for (const tok of tokens) {
+      const isMathGlyph = NON_BANGLA_MATH_REGEX.test(tok);
+      NON_BANGLA_MATH_REGEX.lastIndex = 0;
+      const isOp = isMathSymbolOrOperator(tok);
+      const { size } = isOp ? getMathOpVerticalOffset(fontSize, hasBanglaFont) : { size: fontSize };
+      const fontName = isMathGlyph ? (bold ? "MathFont-Bold" : "MathFont") : (bold ? "BanglaFont-Bold" : "BanglaFont");
+      w += getCachedWidth(doc, fontName, size, tok);
+    }
+    result = w;
   }
 
-  if (!hasSpecialMath) {
-    doc.fontSize(fontSize);
-    doc.font(bold ? "BanglaFont-Bold" : "BanglaFont");
-    return doc.widthOfString(text);
-  }
-
-  const tokens = text.split(NON_BANGLA_MATH_REGEX).filter(Boolean);
-  let w = 0;
-  for (const tok of tokens) {
-    const isMathGlyph = NON_BANGLA_MATH_REGEX.test(tok);
-    NON_BANGLA_MATH_REGEX.lastIndex = 0;
-    const isOp = isMathSymbolOrOperator(tok);
-    const { size } = isOp ? getMathOpVerticalOffset(fontSize, hasBanglaFont) : { size: fontSize };
-    doc.fontSize(size);
-    doc.font(isMathGlyph ? (bold ? "MathFont-Bold" : "MathFont") : (bold ? "BanglaFont-Bold" : "BanglaFont"));
-    w += doc.widthOfString(tok);
-  }
-  return w;
+  cache.tokenMeasureCache.set(cacheKey, result);
+  return result;
 }
 
 function drawTokenizedString(
@@ -806,17 +865,19 @@ function drawTokenizedString(
   if (!isBangla && !hasSpecialMath) {
     const isOp = isMathSymbolOrOperator(text);
     const { size, yOffset } = isOp ? getMathOpVerticalOffset(fontSize, hasBanglaFont) : { size: fontSize, yOffset: 0 };
+    const fontName = bold ? "MathFont-Bold" : "MathFont";
     doc.fontSize(size);
-    doc.font(bold ? "MathFont-Bold" : "MathFont");
+    doc.font(fontName);
     doc.text(text, x, y + yOffset, { lineBreak: false });
-    return doc.widthOfString(text);
+    return getCachedWidth(doc, fontName, size, text);
   }
 
   if (!hasSpecialMath) {
+    const fontName = bold ? "BanglaFont-Bold" : "BanglaFont";
     doc.fontSize(fontSize);
-    doc.font(bold ? "BanglaFont-Bold" : "BanglaFont");
+    doc.font(fontName);
     doc.text(text, x, y, { lineBreak: false });
-    return doc.widthOfString(text);
+    return getCachedWidth(doc, fontName, fontSize, text);
   }
 
   const tokens = text.split(NON_BANGLA_MATH_REGEX).filter(Boolean);
@@ -826,10 +887,11 @@ function drawTokenizedString(
     NON_BANGLA_MATH_REGEX.lastIndex = 0;
     const isOp = isMathSymbolOrOperator(tok);
     const { size, yOffset } = isOp ? getMathOpVerticalOffset(fontSize, hasBanglaFont) : { size: fontSize, yOffset: 0 };
+    const fontName = isMathGlyph ? (bold ? "MathFont-Bold" : "MathFont") : (bold ? "BanglaFont-Bold" : "BanglaFont");
     doc.fontSize(size);
-    doc.font(isMathGlyph ? (bold ? "MathFont-Bold" : "MathFont") : (bold ? "BanglaFont-Bold" : "BanglaFont"));
+    doc.font(fontName);
     doc.text(tok, curX, y + yOffset, { lineBreak: false });
-    curX += doc.widthOfString(tok);
+    curX += getCachedWidth(doc, fontName, size, tok);
   }
   return curX - x;
 }
@@ -841,8 +903,16 @@ function layoutTextWithMath(
   fontSize: number,
   hasBanglaFont: boolean,
   bold: boolean,
-  lineGap: number = 1
+  lineGap: number = 1,
+  cacheKey?: string
 ): Array<{ items: Array<LayoutItem & { width: number }>; totalWidth: number; lineHeight: number }> {
+  const cache = getDocCache(doc);
+  const layoutKey = cacheKey ? `${cacheKey}\0${width}\0${fontSize}\0${hasBanglaFont ? 1 : 0}\0${bold ? 1 : 0}\0${lineGap}` : "";
+  if (layoutKey) {
+    const cached = cache.layoutCache.get(layoutKey);
+    if (cached) return cached;
+  }
+
   const lines: Array<{ items: Array<LayoutItem & { width: number }>; totalWidth: number; lineHeight: number }> = [];
   let currentLine: Array<LayoutItem & { width: number }> = [];
   let currentLineWidth = 0;
@@ -942,9 +1012,14 @@ function layoutTextWithMath(
     lines.push({ items: currentLine, totalWidth: currentLineWidth, lineHeight: computeLineHeight(currentLine) });
   }
 
-  return lines.length > 0
+  const result = lines.length > 0
     ? lines
     : [{ items: [], totalWidth: 0, lineHeight: Math.max(13, Math.round(fontSize * 1.38 + lineGap)) }];
+
+  if (layoutKey) {
+    cache.layoutCache.set(layoutKey, result);
+  }
+  return result;
 }
 
 const layoutTextWithFractions = layoutTextWithMath;
@@ -986,7 +1061,7 @@ function drawPdfText(
 
   // Text contains fractions, matrices, limits, or integrals: wrap and draw with token positioning
   const items = parseTextWithMath(normalizedText);
-  const lines = layoutTextWithMath(doc, items, width, fontSize, hasBanglaFont, bold, lineGap);
+  const lines = layoutTextWithMath(doc, items, width, fontSize, hasBanglaFont, bold, lineGap, normalizedText);
 
   let currentY = y;
   lines.forEach((line) => {
@@ -1030,21 +1105,31 @@ function measurePdfText(
   hasBanglaFont: boolean,
   bold: boolean = false
 ): number {
+  if (!text) return 0;
+  const cache = getDocCache(doc);
+  const cacheKey = `${text}\0${width}\0${fontSize}\0${hasBanglaFont ? 1 : 0}\0${bold ? 1 : 0}`;
+  const cached = cache.measurePdfTextCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const normalizedText = text.replace(/\s+([?,.!;:])(?=\s|$)/g, "$1");
   const hasMathBlock = /\\frac|\\begin\{(?:bmatrix|pmatrix|vmatrix|Vmatrix|matrix)\}|\[\s*\[|\|\s*\[|\\lim|\\(int|iint|iiint|oint)\b/.test(normalizedText);
   const hasSpecialMath = NON_BANGLA_MATH_REGEX.test(normalizedText);
   NON_BANGLA_MATH_REGEX.lastIndex = 0;
 
+  let h = 0;
   if (!hasMathBlock && !hasSpecialMath) {
     doc.fontSize(fontSize);
     const isBangla = /[\u0980-\u09FF]/.test(normalizedText) && hasBanglaFont;
     doc.font(isBangla ? (bold ? "BanglaFont-Bold" : "BanglaFont") : (bold ? "MathFont-Bold" : "MathFont"));
-    return doc.heightOfString(normalizedText, { width, lineGap: 1 });
+    h = doc.heightOfString(normalizedText, { width, lineGap: 1 });
+  } else {
+    const items = parseTextWithMath(normalizedText);
+    const lines = layoutTextWithMath(doc, items, width, fontSize, hasBanglaFont, bold, 1, normalizedText);
+    h = lines.reduce((sum, line) => sum + line.lineHeight, 0);
   }
 
-  const items = parseTextWithMath(normalizedText);
-  const lines = layoutTextWithMath(doc, items, width, fontSize, hasBanglaFont, bold);
-  return lines.reduce((sum, line) => sum + line.lineHeight, 0);
+  cache.measurePdfTextCache.set(cacheKey, h);
+  return h;
 }
 
 const toBengaliDigits = (n: number | string) =>
@@ -1236,6 +1321,11 @@ function measureQuestionHeight(
   hasBanglaFont: boolean,
   optionLabelStyle?: string
 ): number {
+  const cache = getDocCache(doc);
+  const qKey = `qh\0${question.id || index}\0${width}\0${hasBanglaFont ? 1 : 0}\0${optionLabelStyle || ""}`;
+  const cachedH = cache.measurePdfTextCache.get(qKey);
+  if (cachedH !== undefined) return cachedH;
+
   const serial = getQuestionDisplaySerial(question, index);
   const cleanTitle = getCleanQuestionTitle(question.title);
   const serialWidth = Math.max(18, measurePdfText(doc, serial, 60, 11, hasBanglaFont, true) + 4);
@@ -1281,7 +1371,9 @@ function measureQuestionHeight(
     }
   }
 
-  return titleHeight + 2 + subtitleHeight + imageHeight + (question.type === "cq" ? subHeight : optionsHeight) + 8;
+  const totalH = titleHeight + 2 + subtitleHeight + imageHeight + (question.type === "cq" ? subHeight : optionsHeight) + 8;
+  cache.measurePdfTextCache.set(qKey, totalH);
+  return totalH;
 }
 
 type TwoColumnPage = {
@@ -1680,7 +1772,7 @@ function drawQuestionCard(
 
   // Align serial and title
   const titleItems = parseTextWithMath(cleanTitle);
-  const titleLines = layoutTextWithMath(doc, titleItems, titleWidth, 11, hasBanglaFont, true);
+  const titleLines = layoutTextWithMath(doc, titleItems, titleWidth, 11, hasBanglaFont, true, 1, cleanTitle.replace(/\s+([?,.!;:])(?=\s|$)/g, "$1"));
   const firstTitleMatrixH = titleLines[0]?.items.reduce((max, it) => it.type === "matrix" ? Math.max(max, it.height ?? 0) : max, 0) ?? 0;
   const serialYOffset = firstTitleMatrixH > 0 ? Math.max(0, Math.round((firstTitleMatrixH - 11) / 2)) : 0;
 
@@ -1736,7 +1828,7 @@ function drawQuestionCard(
       const cleanItemText = formatMathForExport(item.text);
       const labelWidth = Math.max(16, measurePdfText(doc, label, 40, 10, hasBanglaFont, true) + 4);
       const subItems = parseTextWithMath(cleanItemText);
-      const subLines = layoutTextWithMath(doc, subItems, width - indent - labelWidth - 44, 10, hasBanglaFont, false);
+      const subLines = layoutTextWithMath(doc, subItems, width - indent - labelWidth - 44, 10, hasBanglaFont, false, 1, cleanItemText.replace(/\s+([?,.!;:])(?=\s|$)/g, "$1"));
       const firstLineMatrixH = subLines[0]?.items.reduce((max, it) => it.type === "matrix" ? Math.max(max, it.height ?? 0) : max, 0) ?? 0;
       const subLabelYOffset = firstLineMatrixH > 0 ? Math.max(0, Math.round((firstLineMatrixH - 10) / 2)) : 0;
 

@@ -403,8 +403,12 @@ export function convertDivisionToFractions(text: string): string {
   return s;
 }
 
+const formatMathCache = new Map<string, string>();
+
 export function formatMathForExport(text?: string | null): string {
   if (!text) return "";
+  const cached = formatMathCache.get(text);
+  if (cached !== undefined) return cached;
 
   // 1. Normalize trigonometric theta positioning and degree expressions
   let result = normalizeTrigPowersAndTheta(text);
@@ -482,6 +486,9 @@ export function formatMathForExport(text?: string | null): string {
     result = result.replace(mathBlockPlaceholders[i].key, mathBlockPlaceholders[i].val);
   }
 
+  if (formatMathCache.size < 5000) {
+    formatMathCache.set(text, result);
+  }
   return result;
 }
 

@@ -9,7 +9,7 @@ import {
 } from "./billing.service.js";
 
 const checkoutSchema = z.object({
-  planCode: z.enum(["small", "pro", "ultra", "diamond", "standard"]),
+  planCode: z.string().min(1, "Please select a plan"),
   paymentOptionId: z.string().min(1, "Please select a payment option"),
   transactionId: z.string().min(3, "Please enter a valid Transaction ID"),
   senderNumber: z.string().optional(),

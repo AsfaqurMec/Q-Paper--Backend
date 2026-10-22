@@ -1152,9 +1152,50 @@ function drawHeader(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolea
   const timeText = isBangla ? `সময়: ${durationFormatted}` : `Time: ${paper.duration}`;
   const marksText = isBangla ? `পূর্ণমান: ${toBengaliDigits(paper.totalMarks)}` : `Marks: ${paper.totalMarks}`;
 
-  let currentY = 26;
+  let currentY = 22;
 
-  // 1. Exam Name / Title (Centered, bold, prominent)
+  // 1. Top Bar: Set Badge & Institute (guarantees zero collision with Exam Title)
+  const hasInstitute = Boolean(paper.institute && paper.institute.trim());
+  const hasSet = Boolean(paper.setName && paper.setName.trim());
+
+  if (hasInstitute || hasSet) {
+    if (hasSet) {
+      const banglaSetMap: Record<string, string> = { A: "ক", B: "খ", C: "গ", D: "ঘ" };
+      const displaySet = isBangla ? (banglaSetMap[paper.setName!.trim().toUpperCase()] || paper.setName) : paper.setName;
+      const setBadgeText = isBangla ? `সেট: ${displaySet}` : `Set: ${displaySet}`;
+      const badgeW = 64;
+      const badgeH = 18;
+      const badgeX = page.width - page.marginSide - badgeW;
+      const badgeY = currentY;
+
+      doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3).fillColor("#f0fdfa").fill();
+      doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3).strokeColor("#0d9488").lineWidth(0.8).stroke();
+      drawPdfText(doc, setBadgeText, badgeX, badgeY + 3, hasBanglaFont, {
+        width: badgeW,
+        align: "center",
+        fontSize: 10,
+        bold: true,
+        color: "#0f766e"
+      });
+    }
+
+    if (hasInstitute) {
+      const instWidth = hasSet ? headerWidth - 74 : headerWidth;
+      drawPdfText(doc, paper.institute!.trim(), page.marginSide, currentY + 1, hasBanglaFont, {
+        width: instWidth,
+        align: "center",
+        fontSize: 12,
+        bold: true,
+        color: "#0f766e"
+      });
+    }
+
+    currentY += 24;
+  } else {
+    currentY = 24;
+  }
+
+  // 2. Exam Name / Title (Centered, bold, prominent - full width without collision)
   drawPdfText(doc, cleanName, page.marginSide, currentY, hasBanglaFont, {
     width: headerWidth,
     align: "center",
@@ -1162,27 +1203,6 @@ function drawHeader(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolea
     bold: true
   });
   const nameHeight = measurePdfText(doc, cleanName, headerWidth, 17, hasBanglaFont, true);
-
-  // 2. Set Badge (Top-Right, neatly enclosed in pill box)
-  if (paper.setName) {
-    const banglaSetMap: Record<string, string> = { A: "ক", B: "খ", C: "গ", D: "ঘ" };
-    const displaySet = isBangla ? (banglaSetMap[paper.setName.toUpperCase()] || paper.setName) : paper.setName;
-    const setBadgeText = isBangla ? `সেট: ${displaySet}` : `Set: ${displaySet}`;
-    const badgeW = 66;
-    const badgeH = 20;
-    const badgeX = page.width - page.marginSide - badgeW;
-    const badgeY = currentY - 1;
-
-    doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 4).fillColor("#f0fdfa").fill();
-    doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 4).strokeColor("#0d9488").lineWidth(0.8).stroke();
-    drawPdfText(doc, setBadgeText, badgeX, badgeY + 4, hasBanglaFont, {
-      width: badgeW,
-      align: "center",
-      fontSize: 10.5,
-      bold: true,
-      color: "#0f766e"
-    });
-  }
 
   currentY += Math.max(22, nameHeight + 6);
 

@@ -27,9 +27,15 @@ import {
   updateAdminTicketStatus,
   getAdminSystemDiagnostics
 } from "./admin.service.js";
+import {
+  getDbPlans,
+  createDbPlan,
+  updateDbPlan,
+  deleteDbPlan
+} from "../plans/plan.service.js";
 
 const updatePlanSchema = z.object({
-  plan: z.enum(["free", "small", "pro", "ultra", "diamond", "standard"])
+  plan: z.string().min(1, "Plan code is required")
 });
 
 const updateRoleSchema = z.object({
@@ -249,6 +255,46 @@ adminRouter.get(
   asyncHandler(async (_req, res) => {
     const diagnostics = await getAdminSystemDiagnostics();
     return ok(res, diagnostics);
+  })
+);
+
+// ==========================================
+// PLANS & PACKAGES MANAGEMENT (ADMIN CRUD)
+// ==========================================
+
+// GET /api/admin/plans - get all plans for admin
+adminRouter.get(
+  "/plans",
+  asyncHandler(async (_req, res) => {
+    const plans = await getDbPlans();
+    return ok(res, plans);
+  })
+);
+
+// POST /api/admin/plans - create a new plan
+adminRouter.post(
+  "/plans",
+  asyncHandler(async (req, res) => {
+    const newPlan = await createDbPlan(req.body);
+    return ok(res, newPlan, "নতুন প্যাকেজ সফলভাবে তৈরি হয়েছে!", 201);
+  })
+);
+
+// PUT /api/admin/plans/:code - update an existing plan
+adminRouter.put(
+  "/plans/:code",
+  asyncHandler(async (req, res) => {
+    const updatedPlan = await updateDbPlan(req.params.code as string, req.body);
+    return ok(res, updatedPlan, "প্যাকেজের তথ্য সফলভাবে আপডেট হয়েছে!");
+  })
+);
+
+// DELETE /api/admin/plans/:code - delete a plan
+adminRouter.delete(
+  "/plans/:code",
+  asyncHandler(async (req, res) => {
+    await deleteDbPlan(req.params.code as string);
+    return ok(res, { deleted: true }, "প্যাকেজটি সফলভাবে মুছে ফেলা হয়েছে!");
   })
 );
 

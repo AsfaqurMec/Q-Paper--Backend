@@ -109,7 +109,7 @@ export async function deletePaymentOption(id: string) {
 export async function submitPaymentRequest(
   userId: string,
   data: {
-    planCode: "small" | "pro" | "ultra" | "diamond" | "standard";
+    planCode: string;
     paymentOptionId: string;
     transactionId: string;
     senderNumber?: string;

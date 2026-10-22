@@ -39,7 +39,7 @@ const userSchema = new Schema<AuthUserRecord>(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ["user", "admin"], required: true, default: "user" },
-    plan: { type: String, enum: ["free", "small", "pro", "ultra", "diamond", "standard"], required: true, default: "free" },
+    plan: { type: String, required: true, default: "free" },
     verified: { type: Boolean, default: false },
     phone: { type: String },
     institute: { type: String },

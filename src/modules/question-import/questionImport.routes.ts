@@ -33,8 +33,8 @@ questionImportRouter.post(
   "/parse",
   validate(parseSchema),
   asyncHandler(async (req, res) => {
-    if (req.user?.plan !== "ultra" && req.user?.role !== "admin") {
-      throw new ApiError(403, "The Question Import feature is only available in the Ultra package. Please upgrade to Ultra.");
+    if (req.user?.plan !== "ultra" && req.user?.plan !== "diamond" && req.user?.role !== "admin") {
+      throw new ApiError(403, "The Question Import feature is only available in the Ultra and Diamond packages. Please upgrade your plan.");
     }
 
     const started = Date.now();

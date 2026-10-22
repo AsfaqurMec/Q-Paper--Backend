@@ -4,6 +4,7 @@ import { env } from "./config/env.js";
 import { QuestionBankItemModel, type QuestionBankItemRecord, type BankSubQuestion } from "./modules/question-bank/questionBank.models.js";
 import { AcademicClassModel, SubjectModel, ChapterModel } from "./modules/curriculum/curriculum.models.js";
 import { buildEngineMCQ, buildEngineCQ } from "./generators/comprehensiveQuestionEngine.js";
+import { getBengaliClass, getBengaliSubject, getBengaliChapter } from "./modules/curriculum/curriculumBengali.js";
 
 // ==========================================
 // NCTB CURRICULUM DEFINITIONS (SSC & HSC)
@@ -1167,6 +1168,7 @@ export async function seedCurriculum() {
     await AcademicClassModel.create({
       id: classId,
       name: classDef.className,
+      nameBn: CLASS_ALIASES_MAP[classDef.className]?.[0] || getBengaliClass(classDef.className),
       code: classCode,
       aliases: CLASS_ALIASES_MAP[classDef.className] || [classDef.className],
       order: cIdx + 1,
@@ -1187,6 +1189,7 @@ export async function seedCurriculum() {
         id: subjectId,
         classId,
         name: subjectDef.name,
+        nameBn: SUBJECT_ALIASES_MAP[subjectDef.name]?.[0] || getBengaliSubject(subjectDef.name),
         code: subCode,
         category: subjectDef.category,
         aliases: SUBJECT_ALIASES_MAP[subjectDef.name] || [subjectDef.name],
@@ -1212,6 +1215,7 @@ export async function seedCurriculum() {
           subjectId,
           chapterNumber: chapter.number,
           name: chFormatted,
+          nameBn: getBengaliChapter(chFormatted),
           aliases: [chFormatted, chapter.title],
           order: chapter.number,
           status: "active",

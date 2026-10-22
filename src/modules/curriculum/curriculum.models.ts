@@ -3,6 +3,7 @@ import mongoose, { Schema, type Model } from "mongoose";
 export type AcademicClassRecord = {
   id: string;
   name: string;
+  nameBn?: string;
   code: string;
   aliases: string[];
   order: number;
@@ -15,6 +16,7 @@ export type SubjectRecord = {
   id: string;
   classId: string;
   name: string;
+  nameBn?: string;
   code: string;
   category: string;
   aliases: string[];
@@ -30,6 +32,7 @@ export type ChapterRecord = {
   subjectId: string;
   chapterNumber: number;
   name: string;
+  nameBn?: string;
   aliases?: string[];
   order: number;
   status: "active" | "inactive";
@@ -41,6 +44,7 @@ const academicClassSchema = new Schema<AcademicClassRecord>(
   {
     id: { type: String, required: true, unique: true, index: true },
     name: { type: String, required: true, index: true },
+    nameBn: { type: String, default: "" },
     code: { type: String, required: true, index: true },
     aliases: { type: [String], default: [] },
     order: { type: Number, required: true, default: 0 },
@@ -56,6 +60,7 @@ const subjectSchema = new Schema<SubjectRecord>(
     id: { type: String, required: true, unique: true, index: true },
     classId: { type: String, required: true, index: true },
     name: { type: String, required: true, index: true },
+    nameBn: { type: String, default: "" },
     code: { type: String, required: true, index: true },
     category: { type: String, required: true, default: "General", index: true },
     aliases: { type: [String], default: [] },
@@ -77,6 +82,7 @@ const chapterSchema = new Schema<ChapterRecord>(
     subjectId: { type: String, required: true, index: true },
     chapterNumber: { type: Number, required: true, default: 1 },
     name: { type: String, required: true, index: true },
+    nameBn: { type: String, default: "" },
     aliases: { type: [String], default: [] },
     order: { type: Number, required: true, default: 0 },
     status: { type: String, enum: ["active", "inactive"], default: "active", index: true },

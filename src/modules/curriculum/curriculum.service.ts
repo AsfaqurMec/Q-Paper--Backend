@@ -9,6 +9,7 @@ import {
   type ChapterRecord
 } from "./curriculum.models.js";
 import { QuestionBankItemModel } from "../question-bank/questionBank.models.js";
+import { getBengaliClass, getBengaliSubject, getBengaliChapter } from "./curriculumBengali.js";
 
 export type ListClassesOptions = {
   status?: "active" | "inactive" | "all" | string;
@@ -469,6 +470,7 @@ export type ChapterTreeNode = {
   subjectId: string;
   chapterNumber: number;
   name: string;
+  nameBn?: string;
   order: number;
   mcqCount: number;
   cqCount: number;
@@ -479,6 +481,7 @@ export type SubjectTreeNode = {
   id: string;
   classId: string;
   name: string;
+  nameBn?: string;
   code: string;
   category: string;
   order: number;
@@ -491,6 +494,7 @@ export type SubjectTreeNode = {
 export type ClassTreeNode = {
   id: string;
   className: string;
+  nameBn?: string;
   code: string;
   order: number;
   mcqCount: number;
@@ -549,6 +553,7 @@ export async function getCurriculumTree(ownerId?: string, onlyActive = false): P
       id: s.id,
       classId: s.classId,
       name: s.name,
+      nameBn: s.nameBn || getBengaliSubject(s.name),
       code: s.code,
       category: s.category,
       order: s.order,
@@ -567,6 +572,7 @@ export async function getCurriculumTree(ownerId?: string, onlyActive = false): P
       subjectId: ch.subjectId,
       chapterNumber: ch.chapterNumber,
       name: ch.name,
+      nameBn: ch.nameBn || getBengaliChapter(ch.name),
       order: ch.order,
       mcqCount: counts.mcq,
       cqCount: counts.cq,
@@ -587,6 +593,7 @@ export async function getCurriculumTree(ownerId?: string, onlyActive = false): P
     classMap.set(c.id, {
       id: c.id,
       className: c.name,
+      nameBn: c.nameBn || getBengaliClass(c.name),
       code: c.code,
       order: c.order,
       mcqCount: 0,

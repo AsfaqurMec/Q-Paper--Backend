@@ -25,6 +25,7 @@ import {
 } from "docx";
 import type { Paper, Question } from "../shared/types.js";
 import { formatMathForExport, convertBracketMatricesToLatex } from "./mathExportFormatter.js";
+import { getBengaliClass, getBengaliSubject } from "../curriculum/curriculumBengali.js";
 
 type ImageAsset = { buffer: Buffer; width: number; height: number };
 type ImageMap = Map<string, ImageAsset>;
@@ -1136,17 +1137,25 @@ const toBengaliDigits = (n: number | string) =>
   String(n).replace(/[0-9]/g, (d) => ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"][Number(d)]);
 
 function drawHeader(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolean): number {
-  const cleanName = formatMathForExport(paper.name);
+  const isBangla = hasBanglaFont && (/[\u0980-\u09FF]/.test(paper.name + paper.subject) || !paper.subject?.toLowerCase().includes("english"));
+  let cleanName = formatMathForExport(paper.name);
+  if (isBangla) {
+    cleanName = cleanName
+      .replace(/\bModel Test\b/gi, "মডেল টেস্ট")
+      .replace(/\bFinal Exam\b/gi, "বার্ষিক পরীক্ষা")
+      .replace(/\bTest Exam\b/gi, "নির্বাচনী পরীক্ষা");
+  }
   const cleanInstructions = paper.instructions ? formatMathForExport(paper.instructions) : "";
   const headerWidth = page.width - page.marginSide * 2;
-  const isBangla = hasBanglaFont && (/[\u0980-\u09FF]/.test(paper.name + paper.subject) || !paper.subject?.toLowerCase().includes("english"));
 
   // Format Duration & Marks cleanly
   let durationFormatted = paper.duration || (isBangla ? "২ ঘণ্টা" : "2 hours");
   if (isBangla) {
     durationFormatted = durationFormatted
-      .replace(/(\d+)\s*(hour|hr|hours)/gi, (_, n) => `${toBengaliDigits(n)} ঘণ্টা`)
-      .replace(/(\d+)\s*(minute|min|minutes)/gi, (_, n) => `${toBengaliDigits(n)} মিনিট`);
+      .replace(/(\d+)\s*(?:hours?|hrs?|hr|h)\b/gi, (_, n) => `${toBengaliDigits(n)} ঘণ্টা`)
+      .replace(/(\d+)\s*(?:minutes?|mins?|min|m)\b/gi, (_, n) => `${toBengaliDigits(n)} মিনিট`)
+      .replace(/মিনিটs\b/gi, "মিনিট")
+      .replace(/\s*s\b/gi, "");
     durationFormatted = toBengaliDigits(durationFormatted);
   }
   const timeText = isBangla ? `সময়: ${durationFormatted}` : `Time: ${paper.duration}`;
@@ -1207,8 +1216,10 @@ function drawHeader(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolea
   currentY += Math.max(22, nameHeight + 6);
 
   // 3. Class & Subject Line (Centered, bold, distinct line)
-  const classLabel = isBangla ? `শ্রেণি: ${paper.className}` : `Class: ${paper.className}`;
-  const subjectLabel = isBangla ? `বিষয়: ${paper.subject}` : `Subject: ${paper.subject}`;
+  const bnClass = isBangla ? getBengaliClass(paper.className) : paper.className;
+  const bnSubject = isBangla ? getBengaliSubject(paper.subject) : paper.subject;
+  const classLabel = isBangla ? `শ্রেণি: ${bnClass}` : `Class: ${paper.className}`;
+  const subjectLabel = isBangla ? `বিষয়: ${bnSubject}` : `Subject: ${paper.subject}`;
   const classSubjectLine = `${classLabel}        |        ${subjectLabel}`;
   drawPdfText(doc, classSubjectLine, page.marginSide, currentY, hasBanglaFont, {
     width: headerWidth,
@@ -2024,15 +2035,39 @@ function buildDocxBodyForPaper(
   const displaySet = paper.setName
     ? (isBangla ? (banglaSetMap[paper.setName.toUpperCase()] || paper.setName) : paper.setName)
     : "";
+  let docxTitle = cleanName;
+  if (isBangla) {
+    docxTitle = docxTitle
+      .replace(/\bModel Test\b/gi, "মডেল টেস্ট")
+      .replace(/\bFinal Exam\b/gi, "বার্ষিক পরীক্ষা")
+      .replace(/\bTest Exam\b/gi, "নির্বাচনী পরীক্ষা");
+  }
   const titleWithSet = paper.setName
-    ? `${cleanName} (${isBangla ? `সেট: ${displaySet}` : `Set: ${displaySet}`})`
-    : cleanName;
+    ? `${docxTitle} (${isBangla ? `সেট: ${displaySet}` : `Set: ${displaySet}`})`
+    : docxTitle;
+
+  const docxClass = isBangla ? getBengaliClass(paper.className) : paper.className;
+  const docxSubject = isBangla ? getBengaliSubject(paper.subject) : paper.subject;
+  let docxDuration = paper.duration || (isBangla ? "২ ঘণ্টা" : "2 hours");
+  if (isBangla) {
+    docxDuration = docxDuration
+      .replace(/(\d+)\s*(?:hours?|hrs?|hr|h)\b/gi, (_, n) => `${toBengaliDigits(n)} ঘণ্টা`)
+      .replace(/(\d+)\s*(?:minutes?|mins?|min|m)\b/gi, (_, n) => `${toBengaliDigits(n)} মিনিট`)
+      .replace(/মিনিটs\b/gi, "মিনিট")
+      .replace(/\s*s\b/gi, "");
+    docxDuration = toBengaliDigits(docxDuration);
+  }
+  const docxTime = isBangla ? `সময়: ${docxDuration}` : `Time: ${paper.duration}`;
+  const docxMarks = isBangla ? `পূর্ণমান: ${toBengaliDigits(paper.totalMarks)}` : `Marks: ${paper.totalMarks}`;
+  const docxClassLabel = isBangla ? `শ্রেণি: ${docxClass}` : `Class: ${paper.className}`;
+  const docxSubjectLabel = isBangla ? `বিষয়: ${docxSubject}` : `Subject: ${paper.subject}`;
+  const docxSubHeader = `${docxClassLabel}        |        ${docxSubjectLabel}        |        ${docxTime}        |        ${docxMarks}`;
 
   // Header
   const headerChildren: Paragraph[] = [
     ...(isFirstPaper ? [] : [new Paragraph({ text: "", pageBreakBefore: true })]),
     paragraph(titleWithSet, { bold: true, size: 32, center: true, spacing: { after: 60 } }),
-    paragraph(`${paper.className}    ${paper.subject}    Time: ${paper.duration}    Marks: ${paper.totalMarks}`, {
+    paragraph(docxSubHeader, {
       center: true,
       size: 22,
       spacing: { after: cleanInstructions ? 40 : 80 }

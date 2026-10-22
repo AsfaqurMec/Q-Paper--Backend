@@ -5,8 +5,9 @@ import { nanoid } from "nanoid";
 import { createPaper, deletePaper, duplicatePaper, getPaper, listPapers, setStatus, updatePaper, updatePaperQuestions } from "./paper.service.js";
 import { createPaperSchema, paperStatusSchema } from "./paper.schemas.js";
 import { createSetPaper, renderPaperDocx, renderPaperPdf } from "./paperExport.service.js";
-import { QuestionBankItemModel } from "../question-bank/questionBank.models.js";
 import type { Paper } from "../shared/types.js";
+import { getBengaliClass, getBengaliSubject } from "../curriculum/curriculumBengali.js";
+import { QuestionBankItemModel } from "../question-bank/questionBank.models.js";
 
 export const paperRouter = Router();
 
@@ -120,7 +121,7 @@ paperRouter.post(
     const updatedPaper = await updatePaperQuestions(paper.id, req.user!.id, req.user!.plan, combinedQuestions as any);
 
     await QuestionBankItemModel.updateMany(
-      { id: { $in: bankItems.map((b) => b.id) } },
+      { id: { $in: bankItems.map((b: any) => b.id) } },
       { $inc: { usageCount: 1 }, $set: { updatedAt: new Date().toISOString() } }
     );
 
@@ -153,14 +154,17 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
   let preparedPaper = paper;
   let fileSuffix = "";
 
+  const isBangla = /[\u0980-\u09FF]/.test(paper.name + paper.subject) || !paper.subject?.toLowerCase().includes("english");
+  const banglaSetMap: Record<string, string> = { A: "ক", B: "খ", C: "গ", D: "ঘ" };
+
   if (isAllSets) {
-    fileSuffix = "-All-Sets";
+    fileSuffix = isBangla ? "-সকল-সেট" : "-All-Sets";
   } else if (rawSet && rawSet.toLowerCase() !== "none" && rawSet.toLowerCase() !== "original") {
     preparedPaper = createSetPaper(paper, rawSet);
-    fileSuffix = `-Set-${preparedPaper.setName}`;
+    const displaySet = isBangla ? (banglaSetMap[preparedPaper.setName?.toUpperCase() || ""] || preparedPaper.setName) : preparedPaper.setName;
+    fileSuffix = isBangla ? `-সেট-${displaySet}` : `-Set-${preparedPaper.setName}`;
   } else {
     // Ensure clean sequential numbering
-    const isBangla = /[\u0980-\u09FF]/.test(paper.name + paper.subject) || !paper.subject?.toLowerCase().includes("english");
     const toBn = (n: number) => n.toString().replace(/[0-9]/g, (d) => ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"][Number(d)]);
     preparedPaper.questions = (preparedPaper.questions || []).map((q, idx) => ({
       ...q,
@@ -174,8 +178,26 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
     ? (withAnswerParam === "true" || withAnswerParam === "1" || withAnswerParam === "yes" || withAnswerParam === "with")
     : true;
   const answerSuffix = withAnswerParam !== undefined
-    ? (withAnswer ? "-With-Answers" : "-Question-Paper")
-    : "";
+    ? (withAnswer ? (isBangla ? "-উত্তরসহ" : "-With-Answers") : (isBangla ? "-প্রশ্নপত্র" : "-Question-Paper"))
+    : (isBangla ? "-প্রশ্নপত্র" : "");
+
+  let baseName = paper.name.trim();
+  if (isBangla) {
+    if (!/[\u0980-\u09FF]/.test(baseName)) {
+      const bnCls = getBengaliClass(paper.className);
+      const bnSub = getBengaliSubject(paper.subject);
+      if (bnCls || bnSub) {
+        baseName = [bnCls, bnSub, "মডেল-টেস্ট"].filter(Boolean).join("-");
+      } else {
+        baseName = baseName
+          .replace(/\bModel Test\b/gi, "মডেল-টেস্ট")
+          .replace(/\bFinal Exam\b/gi, "বার্ষিক-পরীক্ষা")
+          .replace(/\bTest Exam\b/gi, "নির্বাচনী-পরীক্ষা");
+      }
+    }
+  }
+
+  const dispositionHeader = getExportContentDisposition(baseName, `${fileSuffix}${answerSuffix}`, format);
 
   if (format === "docx") {
     if (req.user!.plan !== "ultra" && req.user!.plan !== "diamond" && req.user!.role !== "admin") {
@@ -183,20 +205,37 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
     }
     const file = await renderPaperDocx(preparedPaper, { withAnswer, allSets: isAllSets });
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-    res.setHeader("Content-Disposition", `attachment; filename="${safeFileName(paper.name)}${fileSuffix}${answerSuffix}.docx"`);
+    res.setHeader("Content-Disposition", dispositionHeader);
     return res.send(file);
   }
   if (format === "pdf") {
     const file = await renderPaperPdf(preparedPaper, { withAnswer, allSets: isAllSets });
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${safeFileName(paper.name)}${fileSuffix}${answerSuffix}.pdf"`);
+    res.setHeader("Content-Disposition", dispositionHeader);
     return res.send(file);
   }
   throw new ApiError(400, "Unsupported export format");
 }));
 
-function safeFileName(value: string) {
-  return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "question-paper";
+function sanitizeUnicodeFileName(value: string) {
+  return value
+    .replace(/[/\\?%*:|"<>#]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "question-paper";
+}
+
+function safeAsciiFileName(value: string) {
+  return value
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "question-paper";
+}
+
+function getExportContentDisposition(baseName: string, suffix: string, ext: string) {
+  const unicodeFullName = `${sanitizeUnicodeFileName(baseName)}${suffix}.${ext}`;
+  const asciiFullName = `${safeAsciiFileName(baseName)}${safeAsciiFileName(suffix)}.${ext}`;
+  return `attachment; filename="${asciiFullName}"; filename*=UTF-8''${encodeURIComponent(unicodeFullName)}`;
 }
 
 function paperLines(paper: Paper) {

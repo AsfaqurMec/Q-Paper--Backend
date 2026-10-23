@@ -8,6 +8,8 @@ import { createSetPaper, renderPaperDocx, renderPaperPdf } from "./paperExport.s
 import type { Paper } from "../shared/types.js";
 import { getBengaliClass, getBengaliSubject, getBengaliPaperTitle } from "../curriculum/curriculumBengali.js";
 import { QuestionBankItemModel } from "../question-bank/questionBank.models.js";
+import { UserModel } from "../auth/auth.models.js";
+import { getPlan } from "../plans/plan.service.js";
 
 export const paperRouter = Router();
 
@@ -135,8 +137,15 @@ paperRouter.delete(
 );
 
 paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
-  const paperDoc = await getPaper(String(req.params.id), req.user!.id);
+  const [paperDoc, userDoc] = await Promise.all([
+    getPaper(String(req.params.id), req.user!.id),
+    UserModel.findOne({ id: req.user!.id }).lean()
+  ]);
   const paper: Paper = (paperDoc as any).toObject ? (paperDoc as any).toObject() : JSON.parse(JSON.stringify(paperDoc));
+
+  const planCode = req.user!.plan || userDoc?.plan || "free";
+  const userPlanDoc = getPlan(planCode);
+  const isAdmin = req.user!.role === "admin";
 
   if (req.query.layout === "single" || req.query.layout === "split") {
     paper.layout = req.query.layout;
@@ -155,6 +164,15 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
 
   const rawSet = req.query.set ? String(req.query.set).trim() : (paper.setName ? String(paper.setName).trim() : "");
   const isAllSets = rawSet.toLowerCase() === "all";
+  const isSetExport = isAllSets || (Boolean(rawSet) && rawSet.toLowerCase() !== "none" && rawSet.toLowerCase() !== "original");
+
+  // Enforce Package Limitation: Multiple Sets / Versions Export
+  if (isSetExport && !userPlanDoc.multipleVersions && !isAdmin) {
+    throw new ApiError(
+      403,
+      "Multiple paper sets/versions export is only available in packages with Multiple Versions enabled (Small, Pro, Ultra, Diamond). Please upgrade your package to export question paper sets."
+    );
+  }
 
   let preparedPaper = paper;
   let fileSuffix = "";
@@ -177,6 +195,19 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
     }));
   }
 
+  // Enforce Package Limitation: Institute Branding
+  const canUseBranding = (userPlanDoc.branding || isAdmin) && Boolean(userDoc?.instituteBranding);
+  if (canUseBranding) {
+    preparedPaper.institute = userDoc?.institute || preparedPaper.institute;
+    preparedPaper.instituteLogo = userDoc?.instituteLogo || preparedPaper.instituteLogo;
+  } else {
+    preparedPaper.institute = undefined;
+    preparedPaper.instituteLogo = undefined;
+  }
+
+  // Enforce Package Limitation: Watermark
+  const shouldWatermark = Boolean(userPlanDoc.watermark && !isAdmin);
+
   const format = String(req.params.format).toLowerCase();
   const withAnswerParam = req.query.withAnswer !== undefined ? String(req.query.withAnswer).trim().toLowerCase() : undefined;
   const withAnswer = withAnswerParam !== undefined
@@ -194,16 +225,29 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
   const dispositionHeader = getExportContentDisposition(baseName, `${fileSuffix}${answerSuffix}`, format);
 
   if (format === "docx") {
-    if (req.user!.plan !== "ultra" && req.user!.plan !== "diamond" && req.user!.role !== "admin") {
+    // Enforce Package Limitation: DOCX Export
+    if (!userPlanDoc.exports.includes("docx") && !isAdmin) {
       throw new ApiError(403, "DOCX export is only available in the Ultra and Diamond packages. Please upgrade your plan.");
     }
-    const file = await renderPaperDocx(preparedPaper, { withAnswer, allSets: isAllSets, sectionFlow });
+    const file = await renderPaperDocx(preparedPaper, {
+      withAnswer,
+      allSets: isAllSets,
+      sectionFlow,
+      watermark: shouldWatermark,
+      branding: canUseBranding
+    });
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", dispositionHeader);
     return res.send(file);
   }
   if (format === "pdf") {
-    const file = await renderPaperPdf(preparedPaper, { withAnswer, allSets: isAllSets, sectionFlow });
+    const file = await renderPaperPdf(preparedPaper, {
+      withAnswer,
+      allSets: isAllSets,
+      sectionFlow,
+      watermark: shouldWatermark,
+      branding: canUseBranding
+    });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", dispositionHeader);
     return res.send(file);

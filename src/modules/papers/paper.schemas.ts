@@ -8,6 +8,8 @@ export const createPaperSchema = z.object({
   duration: z.string().min(1).max(40),
   totalMarks: z.coerce.number().min(1).max(1000),
   institute: z.string().max(160).optional(),
+  instituteLogo: z.string().max(2000).optional(),
+  instituteBranding: z.boolean().optional(),
   instructions: z.string().max(2000).optional(),
   questionNumberStyle: z.enum(["numeric", "upper-alpha", "lower-alpha", "roman"]).default("numeric"),
   optionLabelStyle: z.enum(["upper-alpha", "bangla", "lower-alpha", "numeric"]).default("upper-alpha"),

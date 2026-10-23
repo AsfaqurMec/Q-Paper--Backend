@@ -3,10 +3,11 @@ import mongoose from "mongoose";
 import type { Request } from "express";
 import { env } from "../../config/env.js";
 import { ApiError } from "../../utils/http.js";
-import { assertWithinPlan } from "../plans/plan.service.js";
+import { assertWithinPlan, getPlan } from "../plans/plan.service.js";
 import { checkDeviceFreeLimit, recordDevicePaperCreation } from "../device/device.service.js";
 import type { Paper, PlanCode, Question } from "../shared/types.js";
 import { PaperModel } from "./paper.models.js";
+import { UserModel } from "../auth/auth.models.js";
 
 const now = () => new Date().toISOString();
 export const FORTY_FIVE_DAYS_MS = 45 * 24 * 60 * 60 * 1000;
@@ -103,6 +104,10 @@ export async function createPaper(
 
   const timestamp = now();
   const dateObj = new Date();
+  const user = await UserModel.findOne({ id: ownerId }).lean();
+  const userPlan = getPlan(plan);
+  const canBrand = userPlan.branding && Boolean(user?.instituteBranding);
+
   const paper: Paper = {
     id: `paper_${nanoid(10)}`,
     ownerId,
@@ -111,7 +116,10 @@ export async function createPaper(
     createdAt: timestamp,
     createdAtDate: dateObj,
     updatedAt: timestamp,
-    ...input
+    ...input,
+    institute: canBrand ? (input.institute || user?.institute) : undefined,
+    instituteLogo: canBrand ? (input.instituteLogo || user?.instituteLogo) : undefined,
+    instituteBranding: canBrand
   };
   await PaperModel.create(paper);
 

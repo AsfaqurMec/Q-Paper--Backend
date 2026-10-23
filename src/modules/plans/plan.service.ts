@@ -136,6 +136,10 @@ export type PlanUsageAssertion = {
   totalQuestionsCreated?: number;
   exportFormat?: string;
   isImportAttempt?: boolean;
+  multipleVersionsAttempt?: boolean;
+  brandingAttempt?: boolean;
+  questionBankAttempt?: boolean;
+  randomGeneratorAttempt?: boolean;
 };
 
 export function assertWithinPlan(code: PlanCode | string, usage: PlanUsageAssertion) {
@@ -144,6 +148,34 @@ export function assertWithinPlan(code: PlanCode | string, usage: PlanUsageAssert
   // Diamond plan has unlimited papers and unlimited questions
   if (plan.code === "diamond") {
     return { allowed: true, reason: "Allowed" };
+  }
+
+  if (usage.multipleVersionsAttempt && !plan.multipleVersions) {
+    return {
+      allowed: false,
+      reason: "Multiple paper versions (Sets A, B, C, D) are only available in paid packages (Small, Pro, Ultra, Diamond). Please upgrade your package to generate and export paper sets."
+    };
+  }
+
+  if (usage.brandingAttempt && !plan.branding) {
+    return {
+      allowed: false,
+      reason: "Institute branding is only available in paid packages (Small, Pro, Ultra, Diamond). Please upgrade your package to enable institution logo and branding."
+    };
+  }
+
+  if (usage.questionBankAttempt && !plan.questionBank) {
+    return {
+      allowed: false,
+      reason: "Question Bank access is only available in paid packages (Small, Pro, Ultra, Diamond). Please upgrade your package to access the Question Bank."
+    };
+  }
+
+  if (usage.randomGeneratorAttempt && !plan.randomGenerator) {
+    return {
+      allowed: false,
+      reason: "Random Paper Generator is only available in paid packages (Small, Pro, Ultra, Diamond). Please upgrade your package to use automatic paper generation."
+    };
   }
 
   if (usage.isImportAttempt && !plan.importQuestion) {
@@ -201,6 +233,31 @@ export function assertWithinPlan(code: PlanCode | string, usage: PlanUsageAssert
   }
 
   return { allowed: true, reason: "Allowed" };
+}
+
+export function canUseMultipleVersions(code: PlanCode | string): boolean {
+  return Boolean(getPlan(code).multipleVersions);
+}
+
+export function canUseBranding(code: PlanCode | string): boolean {
+  return Boolean(getPlan(code).branding);
+}
+
+export function canExportFormat(code: PlanCode | string, format: string): boolean {
+  const plan = getPlan(code);
+  return plan.exports.includes(format.toLowerCase() as any);
+}
+
+export function canUseQuestionBank(code: PlanCode | string): boolean {
+  return Boolean(getPlan(code).questionBank);
+}
+
+export function canUseRandomGenerator(code: PlanCode | string): boolean {
+  return Boolean(getPlan(code).randomGenerator);
+}
+
+export function canImportQuestions(code: PlanCode | string): boolean {
+  return Boolean(getPlan(code).importQuestion);
 }
 
 export async function getDbPlans(): Promise<Plan[]> {

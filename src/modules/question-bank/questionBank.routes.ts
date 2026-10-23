@@ -302,7 +302,7 @@ function checkQuestionBankAccess(planCode: string, role?: string) {
   if (role === "admin") return;
   const plan = getPlan(planCode as any);
   if (!plan.questionBank) {
-    throw new ApiError(403, "Question Bank access requires a Standard or Pro plan subscription. Please upgrade to access this feature.");
+    throw new ApiError(403, "Question Bank access requires a Small, Pro, Ultra, or Diamond package subscription. Please upgrade your package.");
   }
 }
 
@@ -310,7 +310,7 @@ function checkRandomGeneratorAccess(planCode: string, role?: string) {
   if (role === "admin") return;
   const plan = getPlan(planCode as any);
   if (!plan.randomGenerator) {
-    throw new ApiError(403, "Random Paper Generator requires a Pro plan subscription. Please upgrade to access this feature.");
+    throw new ApiError(403, "Random Paper Generator requires a Small, Pro, Ultra, or Diamond package subscription. Please upgrade your package.");
   }
 }
 
@@ -1208,6 +1208,7 @@ questionBankRouter.post("/generate-paper", validate(generatePaperSchema), asyncH
 // POST /api/question-bank/create-paper - Create exam paper with selected bank questions
 questionBankRouter.post("/create-paper", validate(createPaperFromSelectedSchema), asyncHandler(async (req, res) => {
   ensureDatabase();
+  checkQuestionBankAccess(req.user!.plan, req.user!.role);
 
   const {
     bankQuestionIds,

@@ -52,6 +52,8 @@ const paperSchema = new Schema<Paper>(
     duration: { type: String, required: true },
     totalMarks: { type: Number, required: true },
     institute: { type: String },
+    instituteLogo: { type: String },
+    instituteBranding: { type: Boolean, default: true },
     instructions: { type: String },
     questionNumberStyle: { type: String, enum: ["numeric", "upper-alpha", "lower-alpha", "roman"], required: true, default: "numeric" },
     optionLabelStyle: { type: String, enum: ["upper-alpha", "bangla", "lower-alpha", "numeric"], required: true, default: "upper-alpha" },

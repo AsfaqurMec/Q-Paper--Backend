@@ -5,6 +5,7 @@ import Tesseract from "tesseract.js";
 import { z } from "zod";
 import { requireAuth } from "../../middleware/auth.middleware.js";
 import { ApiError, asyncHandler, ok, validate } from "../../utils/http.js";
+import { getPlan } from "../plans/plan.service.js";
 import type { ExtractedPage } from "./questionImport.chunker.js";
 import { parseMultimodalDocument, parseQuestionDocument } from "./questionImport.parser.js";
 import type { ParsedQuestion } from "./questionImport.schema.js";
@@ -33,7 +34,8 @@ questionImportRouter.post(
   "/parse",
   validate(parseSchema),
   asyncHandler(async (req, res) => {
-    if (req.user?.plan !== "ultra" && req.user?.plan !== "diamond" && req.user?.role !== "admin") {
+    const plan = getPlan(req.user?.plan || "free");
+    if (!plan.importQuestion && req.user?.role !== "admin") {
       throw new ApiError(403, "The Question Import feature is only available in the Ultra and Diamond packages. Please upgrade your plan.");
     }
 

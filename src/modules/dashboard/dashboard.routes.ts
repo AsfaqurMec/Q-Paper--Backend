@@ -13,10 +13,44 @@ dashboardRouter.use(requireAuth);
 dashboardRouter.get("/", asyncHandler(async (req, res) => {
   const plan = getPlan(req.user!.plan);
   const papers = await listPapers(req.user!.id);
-  const userBankCount = await QuestionBankItemModel.countDocuments({ ownerId: req.user!.id }).catch(() => 0);
-  const totalBankCount = userBankCount > 0 ? userBankCount : await QuestionBankItemModel.countDocuments().catch(() => 0);
-
+  const totalBankCount = await QuestionBankItemModel.countDocuments().catch(() => 0);
   const totalQuestionsUsed = papers.reduce((sum, p) => sum + (p.questions?.length || 0), 0);
+
+  // Dynamic past 6 months calculation
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const now = new Date();
+  const past6Months = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+    return {
+      month: monthNames[d.getMonth()],
+      year: d.getFullYear(),
+      monthNum: d.getMonth()
+    };
+  });
+
+  const papersCreatedChart = past6Months.map(({ month, year, monthNum }) => {
+    const value = papers.filter((p) => {
+      const pDate = p.createdAt ? new Date(p.createdAt) : null;
+      return pDate && pDate.getFullYear() === year && pDate.getMonth() === monthNum;
+    }).length;
+    return { month, value };
+  });
+
+  const downloadsChart = past6Months.map(({ month, year, monthNum }) => {
+    const value = papers.filter((p) => {
+      const pDate = p.createdAt ? new Date(p.createdAt) : null;
+      return pDate && pDate.getFullYear() === year && pDate.getMonth() === monthNum;
+    }).length;
+    return { month, value: Math.max(value, 0) };
+  });
+
+  const recentActivity = papers.length > 0
+    ? papers.slice(0, 5).map((p) => `প্রশ্নপত্র তৈরি: ${p.name} (${p.subject} • ${p.questions?.length || 0}টি প্রশ্ন)`)
+    : [
+        "প্রশ্নপত্র কমান্ড সেন্টার প্রস্তুত",
+        "৩,৫০০+ প্রশ্নব্যাংক থেকে দ্রুত প্রশ্ন নির্বাচন করুন",
+        "৪-সেট শাফলিং ও কাটেক্স সমীকরণ সম্বলিত প্রশ্ন তৈরি করুন"
+      ];
 
   return ok(res, {
     stats: {
@@ -27,31 +61,13 @@ dashboardRouter.get("/", asyncHandler(async (req, res) => {
       totalQuestions: totalQuestionsUsed,
       totalQuestionsLimit: plan.totalQuestionsLimit,
       subscriptionExpiry: req.user!.plan === "free" ? "Lifetime free tier" : "Monthly Auto-renew",
-      totalDownloads: 126,
+      totalDownloads: papers.length,
       questionBankCount: totalBankCount
     },
     charts: {
-      papersCreated: [
-        { month: "Jan", value: 4 },
-        { month: "Feb", value: 7 },
-        { month: "Mar", value: 9 },
-        { month: "Apr", value: 12 },
-        { month: "May", value: 16 },
-        { month: "Jun", value: 11 }
-      ],
-      downloads: [
-        { month: "Jan", value: 12 },
-        { month: "Feb", value: 19 },
-        { month: "Mar", value: 25 },
-        { month: "Apr", value: 34 },
-        { month: "May", value: 41 },
-        { month: "Jun", value: 32 }
-      ]
+      papersCreated: papersCreatedChart,
+      downloads: downloadsChart
     },
-    recentActivity: [
-      "Generated answer sheet for SSC Physics Model Test",
-      "Updated organization branding",
-      "Autosaved 18 questions in Chemistry Chapter Test"
-    ]
+    recentActivity
   });
 }));

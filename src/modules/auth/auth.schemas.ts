@@ -41,5 +41,7 @@ export const refreshSchema = z.object({
 export const updateProfileSchema = z.object({
   name: z.string().min(2).max(80).optional(),
   phone: z.string().max(30).optional(),
-  institute: z.string().max(160).optional()
+  institute: z.string().max(160).optional(),
+  instituteLogo: z.string().max(2000).optional(),
+  instituteBranding: z.boolean().optional()
 });

@@ -7,6 +7,7 @@ import {
   AlignmentType,
   BorderStyle,
   Document,
+  Footer,
   ImageRun,
   Math as DocxMath,
   MathFraction,
@@ -23,6 +24,7 @@ import {
   WidthType,
   XmlComponent
 } from "docx";
+import { env } from "../../config/env.js";
 import type { Paper, Question } from "../shared/types.js";
 import { formatMathForExport, convertBracketMatricesToLatex } from "./mathExportFormatter.js";
 import {
@@ -81,6 +83,136 @@ function getBanglaFontPath(): string | null {
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+export function getSoftwareUrl(): string {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const client = env.CLIENT_URL || "http://localhost:3000";
+  try {
+    const u = new URL(client);
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") {
+      return "www.examcraft.app";
+    }
+    return u.host;
+  } catch {}
+  return "www.examcraft.app";
+}
+
+export function getSoftwareLogoBuffer(): Buffer | null {
+  const candidates = [
+    path.resolve(process.cwd(), "assets/logo-small.png"),
+    path.resolve(process.cwd(), "backend/assets/logo-small.png"),
+    path.resolve(safeDirname, "../../assets/logo-small.png"),
+    path.resolve(safeDirname, "../../../frontend/public/logo-small.png"),
+    path.resolve(process.cwd(), "frontend/public/logo-small.png"),
+    path.resolve(process.cwd(), "assets/logo.png"),
+    path.resolve(process.cwd(), "backend/assets/logo.png")
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      try {
+        return fs.readFileSync(c);
+      } catch {}
+    }
+  }
+  return null;
+}
+
+export async function loadSingleImage(imageUrl?: string): Promise<ImageAsset | null> {
+  if (!imageUrl) return null;
+  try {
+    let buffer: Buffer | null = null;
+    const trimmed = imageUrl.trim();
+
+    if (trimmed.startsWith("data:")) {
+      const marker = ";base64,";
+      const markerIdx = trimmed.indexOf(marker);
+      if (markerIdx !== -1) {
+        buffer = Buffer.from(trimmed.slice(markerIdx + marker.length), "base64");
+      }
+    } else {
+      let url = trimmed;
+      if (url.startsWith("/")) {
+        const baseUrl =
+          process.env.SERVER_URL ||
+          process.env.RENDER_EXTERNAL_URL ||
+          `http://127.0.0.1:${process.env.PORT || 5000}`;
+        url = `${baseUrl.replace(/\/+$/, "")}${url}`;
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: { "User-Agent": "ExamCraft-Export/1.0" }
+        });
+        if (response.ok) {
+          buffer = Buffer.from(await response.arrayBuffer());
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    if (buffer && buffer.length > 0) {
+      const size = readImageSize(buffer);
+      if (size) return { buffer, ...size };
+    }
+  } catch {
+    // Return null if image cannot be loaded
+  }
+  return null;
+}
+
+function drawWatermarkFooter(doc: PDFKit.PDFDocument, hasBanglaFont: boolean) {
+  const range = doc.bufferedPageRange();
+  const logoBuffer = getSoftwareLogoBuffer();
+  const footerY = page.height - 21;
+  const lineY = page.height - 26;
+  const softwareName = "ExamCraft";
+  const softwareUrl = getSoftwareUrl();
+
+  for (let i = range.start; i < range.start + range.count; i++) {
+    doc.switchToPage(i);
+    doc.save();
+
+    // Divider line across bottom
+    doc.strokeColor("#cbd5e1").lineWidth(0.5);
+    doc.moveTo(page.marginSide, lineY).lineTo(page.width - page.marginSide, lineY).stroke();
+
+    // Left side: Software logo & Name
+    let textX = page.marginSide;
+    if (logoBuffer) {
+      try {
+        doc.image(logoBuffer, page.marginSide, footerY - 2, { height: 13, width: 13 });
+        textX += 17;
+      } catch {}
+    }
+
+    doc.fillColor("#475569").fontSize(8.5);
+    if (hasBanglaFont) {
+      doc.font("BanglaFont-Bold");
+    } else {
+      doc.font("Helvetica-Bold");
+    }
+    doc.text(softwareName, textX, footerY, { lineBreak: false });
+
+    // Right side: Software URL
+    doc.fillColor("#64748b").fontSize(8);
+    if (hasBanglaFont) {
+      doc.font("BanglaFont");
+    } else {
+      doc.font("Helvetica");
+    }
+    doc.text(softwareUrl, page.marginSide, footerY, {
+      width: page.width - page.marginSide * 2,
+      align: "right",
+      lineBreak: false
+    });
+
+    doc.restore();
+  }
 }
 
 export function createSetPaper(basePaper: Paper, setKey: string): Paper {
@@ -149,9 +281,18 @@ export function createSetPaper(basePaper: Paper, setKey: string): Paper {
 
 export async function renderPaperPdf(
   paper: Paper,
-  options?: { withAnswer?: boolean; allSets?: boolean; sectionFlow?: "separate" | "single" }
+  options?: {
+    withAnswer?: boolean;
+    allSets?: boolean;
+    sectionFlow?: "separate" | "single";
+    watermark?: boolean;
+    branding?: boolean;
+  }
 ) {
-  const images = await loadQuestionImages(paper);
+  const [images, instLogo] = await Promise.all([
+    loadQuestionImages(paper),
+    options?.branding !== false && paper.instituteLogo ? loadSingleImage(paper.instituteLogo) : Promise.resolve(null)
+  ]);
   const doc = new PDFDocument({
     size: "A4",
     margins: {
@@ -187,18 +328,22 @@ export async function renderPaperPdf(
       if (sIdx > 0) {
         doc.addPage();
       }
-      const headerEndY = drawHeader(doc, setPaper, Boolean(banglaFont));
+      const headerEndY = drawHeader(doc, setPaper, Boolean(banglaFont), instLogo, options);
       drawQuestions(doc, setPaper, images, Boolean(banglaFont), headerEndY, effectiveSectionFlow);
       if (options?.withAnswer !== false) {
         drawAnswers(doc, setPaper, Boolean(banglaFont));
       }
     }
   } else {
-    const headerEndY = drawHeader(doc, paper, Boolean(banglaFont));
+    const headerEndY = drawHeader(doc, paper, Boolean(banglaFont), instLogo, options);
     drawQuestions(doc, paper, images, Boolean(banglaFont), headerEndY, effectiveSectionFlow);
     if (options?.withAnswer !== false) {
       drawAnswers(doc, paper, Boolean(banglaFont));
     }
+  }
+
+  if (options?.watermark) {
+    drawWatermarkFooter(doc, Boolean(banglaFont));
   }
 
   doc.end();
@@ -1142,7 +1287,13 @@ function measurePdfText(
   return h;
 }
 
-function drawHeader(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolean): number {
+function drawHeader(
+  doc: PDFKit.PDFDocument,
+  paper: Paper,
+  hasBanglaFont: boolean,
+  instLogoAsset?: ImageAsset | null,
+  options?: { branding?: boolean }
+): number {
   const isBangla = hasBanglaFont && (/[\u0980-\u09FF]/.test(paper.name + paper.subject) || !paper.subject?.toLowerCase().includes("english"));
   const cleanName = isBangla
     ? getBengaliPaperTitle(paper.name, paper.className, paper.subject)
@@ -1158,10 +1309,12 @@ function drawHeader(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolea
   let currentY = 22;
 
   // 1. Top Bar: Set Badge & Institute (guarantees zero collision with Exam Title)
-  const hasInstitute = Boolean(paper.institute && paper.institute.trim());
+  const canBrand = options?.branding !== false;
+  const hasInstitute = Boolean(canBrand && paper.institute && paper.institute.trim());
+  const hasInstLogo = Boolean(canBrand && instLogoAsset);
   const hasSet = Boolean(paper.setName && paper.setName.trim());
 
-  if (hasInstitute || hasSet) {
+  if (hasInstitute || hasSet || hasInstLogo) {
     if (hasSet) {
       const banglaSetMap: Record<string, string> = { A: "ক", B: "খ", C: "গ", D: "ঘ" };
       const displaySet = isBangla ? (banglaSetMap[paper.setName!.trim().toUpperCase()] || paper.setName) : paper.setName;
@@ -1182,12 +1335,21 @@ function drawHeader(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolea
       });
     }
 
+    if (hasInstLogo && instLogoAsset) {
+      try {
+        const logoSize = 22;
+        doc.image(instLogoAsset.buffer, page.marginSide, currentY - 1, { height: logoSize, width: logoSize });
+      } catch {}
+    }
+
     if (hasInstitute) {
-      const instWidth = hasSet ? headerWidth - 74 : headerWidth;
-      drawPdfText(doc, paper.institute!.trim(), page.marginSide, currentY + 1, hasBanglaFont, {
+      const logoOffset = hasInstLogo ? 28 : 0;
+      const rightReserved = hasSet ? 74 : (hasInstLogo ? 28 : 0);
+      const instWidth = headerWidth - logoOffset - rightReserved;
+      drawPdfText(doc, paper.institute!.trim(), page.marginSide + logoOffset, currentY + 1, hasBanglaFont, {
         width: instWidth,
-        align: "center",
-        fontSize: 12,
+        align: hasInstLogo ? "left" : "center",
+        fontSize: 13,
         bold: true,
         color: "#0f766e"
       });
@@ -2013,7 +2175,7 @@ function docxSectionHeadline(title: string, instructions?: string): Paragraph[] 
 function buildDocxBodyForPaper(
   paper: Paper,
   images: ImageMap,
-  options?: { withAnswer?: boolean; allSets?: boolean; sectionFlow?: "separate" | "single" },
+  options?: { withAnswer?: boolean; allSets?: boolean; sectionFlow?: "separate" | "single"; branding?: boolean; watermark?: boolean },
   isFirstPaper = true
 ): Array<Paragraph | Table> {
   const cleanName = formatMathForExport(paper.name);
@@ -2060,10 +2222,12 @@ function buildDocxBodyForPaper(
   const docxSubjectLabel = isBangla ? `বিষয়: ${docxSubject}` : `Subject: ${paper.subject}`;
   const docxSubHeader = `${docxClassLabel}        |        ${docxSubjectLabel}        |        ${docxTime}        |        ${docxMarks}`;
 
+  const canBrand = options?.branding !== false;
+
   // Header
   const headerChildren: Paragraph[] = [
     ...(isFirstPaper ? [] : [new Paragraph({ text: "", pageBreakBefore: true })]),
-    ...(paper.institute?.trim() ? [paragraph(paper.institute.trim(), { bold: true, size: 28, center: true, spacing: { after: 30 } })] : []),
+    ...(canBrand && paper.institute?.trim() ? [paragraph(paper.institute.trim(), { bold: true, size: 28, center: true, spacing: { after: 30 } })] : []),
     paragraph(titleWithSet, { bold: true, size: 32, center: true, spacing: { after: 60 } }),
     paragraph(docxSubHeader, {
       center: true,
@@ -2216,7 +2380,13 @@ function buildDocxBodyForPaper(
 
 export async function renderPaperDocx(
   paper: Paper,
-  options?: { withAnswer?: boolean; allSets?: boolean; sectionFlow?: "separate" | "single" }
+  options?: {
+    withAnswer?: boolean;
+    allSets?: boolean;
+    sectionFlow?: "separate" | "single";
+    branding?: boolean;
+    watermark?: boolean;
+  }
 ) {
   const images = await loadQuestionImages(paper);
   const bodyChildren: Array<Paragraph | Table> = [];
@@ -2232,6 +2402,49 @@ export async function renderPaperDocx(
   } else {
     bodyChildren.push(...buildDocxBodyForPaper(paper, images, options, true));
   }
+
+  const footers = options?.watermark
+    ? {
+        default: new Footer({
+          children: [
+            new Table({
+              width: { size: 100, type: WidthType.PERCENTAGE },
+              borders: {
+                top: { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" },
+                bottom: { style: BorderStyle.NONE },
+                left: { style: BorderStyle.NONE },
+                right: { style: BorderStyle.NONE },
+                insideHorizontal: { style: BorderStyle.NONE },
+                insideVertical: { style: BorderStyle.NONE }
+              },
+              rows: [
+                new TableRow({
+                  children: [
+                    new TableCell({
+                      width: { size: 50, type: WidthType.PERCENTAGE },
+                      children: [
+                        new Paragraph({
+                          children: [new TextRun({ text: "ExamCraft", bold: true, size: 16, color: "475569" })]
+                        })
+                      ]
+                    }),
+                    new TableCell({
+                      width: { size: 50, type: WidthType.PERCENTAGE },
+                      children: [
+                        new Paragraph({
+                          alignment: AlignmentType.RIGHT,
+                          children: [new TextRun({ text: getSoftwareUrl(), size: 16, color: "64748B" })]
+                        })
+                      ]
+                    })
+                  ]
+                })
+              ]
+            })
+          ]
+        })
+      }
+    : undefined;
 
   const document = new Document({
     styles: {
@@ -2254,6 +2467,7 @@ export async function renderPaperDocx(
             margin: { top: 720, bottom: 720, left: 720, right: 720 }
           }
         },
+        footers,
         children: bodyChildren
       }
     ]

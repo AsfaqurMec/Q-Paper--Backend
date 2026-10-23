@@ -8,6 +8,7 @@ import { ApiError } from "../../utils/http.js";
 import type { Request } from "express";
 import { AuthSessionModel, PasswordResetTokenModel, UserModel, type AuthUserRecord } from "./auth.models.js";
 import { resolveDevice } from "../device/device.service.js";
+import { getPlan } from "../plans/plan.service.js";
 
 const refreshTokenTtlMs = 1000 * 60 * 60 * 24 * 30;
 const now = () => new Date().toISOString();
@@ -229,23 +230,44 @@ export async function getUserById(userId: string) {
 
 export async function updateProfile(
   userId: string,
-  input: { name?: string; phone?: string; institute?: string }
+  input: {
+    name?: string;
+    phone?: string;
+    institute?: string;
+    instituteLogo?: string;
+    instituteBranding?: boolean;
+  }
 ) {
   ensureDatabase();
+
+  const user = await UserModel.findOne({ id: userId });
+  if (!user) throw new ApiError(404, "User not found");
+
+  if (input.instituteBranding === true) {
+    const plan = getPlan(user.plan);
+    if (!plan.branding && user.role !== "admin") {
+      throw new ApiError(
+        403,
+        "Institute branding is only available in paid packages (Small, Pro, Ultra, Diamond). Please upgrade your package to enable institute branding."
+      );
+    }
+  }
 
   const updateData: Record<string, any> = { updatedAt: now() };
   if (input.name && input.name.trim()) updateData.name = input.name.trim();
   if (input.phone !== undefined) updateData.phone = input.phone.trim();
   if (input.institute !== undefined) updateData.institute = input.institute.trim();
+  if (input.instituteLogo !== undefined) updateData.instituteLogo = input.instituteLogo.trim();
+  if (input.instituteBranding !== undefined) updateData.instituteBranding = Boolean(input.instituteBranding);
 
-  const user = await UserModel.findOneAndUpdate(
+  const updatedUser = await UserModel.findOneAndUpdate(
     { id: userId },
     { $set: updateData },
     { new: true }
   ).lean();
-  if (!user) throw new ApiError(404, "User not found");
+  if (!updatedUser) throw new ApiError(404, "User not found");
 
-  return publicUser(user);
+  return publicUser(updatedUser);
 }
 
 export function publicUser(user: Partial<AuthUserRecord> & { id: string; name: string; email: string; role: "user" | "admin"; plan: any }) {
@@ -258,6 +280,8 @@ export function publicUser(user: Partial<AuthUserRecord> & { id: string; name: s
     verified: Boolean(user.verified),
     phone: user.phone || "",
     institute: user.institute || "",
+    instituteLogo: user.instituteLogo || "",
+    instituteBranding: Boolean(user.instituteBranding),
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };

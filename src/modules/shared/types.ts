@@ -31,6 +31,8 @@ export type Paper = {
   duration: string;
   totalMarks: number;
   institute?: string;
+  instituteLogo?: string;
+  instituteBranding?: boolean;
   instructions?: string;
   questionNumberStyle: "numeric" | "upper-alpha" | "lower-alpha" | "roman";
   optionLabelStyle: "upper-alpha" | "bangla" | "lower-alpha" | "numeric";

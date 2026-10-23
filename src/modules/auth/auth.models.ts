@@ -11,6 +11,8 @@ export type AuthUserRecord = {
   verified: boolean;
   phone?: string;
   institute?: string;
+  instituteLogo?: string;
+  instituteBranding?: boolean;
   failedLoginAttempts?: number;
   lockUntil?: number;
   createdAt: string;
@@ -43,6 +45,8 @@ const userSchema = new Schema<AuthUserRecord>(
     verified: { type: Boolean, default: false },
     phone: { type: String },
     institute: { type: String },
+    instituteLogo: { type: String },
+    instituteBranding: { type: Boolean, default: false },
     failedLoginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Number, default: 0 },
     createdAt: { type: String, required: true },

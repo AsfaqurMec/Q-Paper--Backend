@@ -295,7 +295,7 @@ export async function getDbPlans(): Promise<Plan[]> {
           name: p.name,
           price: p.price,
           interval: p.interval as any,
-          duration: p.duration || (p.price === 0 ? "লাইফটাইম" : "৩০ দিন"),
+          duration: p.duration || (p.price === 0 ? "লাইফটাইম" : "৩০ দিন (১ মাস)"),
           durationDays: typeof p.durationDays === "number" ? p.durationDays : (p.price === 0 ? 0 : 30),
           paperLimit: p.paperLimit,
           questionLimit: p.questionLimit,

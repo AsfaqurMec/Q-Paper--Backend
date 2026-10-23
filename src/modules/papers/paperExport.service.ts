@@ -1308,56 +1308,55 @@ function drawHeader(
 
   let currentY = 22;
 
-  // 1. Top Bar: Set Badge & Institute (guarantees zero collision with Exam Title)
+  // 1. Top Bar: Set Badge & Institute Branding (Centered & perfectly aligned)
   const canBrand = options?.branding !== false;
   const hasInstitute = Boolean(canBrand && paper.institute && paper.institute.trim());
   const hasInstLogo = Boolean(canBrand && instLogoAsset);
   const hasSet = Boolean(paper.setName && paper.setName.trim());
 
-  if (hasInstitute || hasSet || hasInstLogo) {
-    if (hasSet) {
-      const banglaSetMap: Record<string, string> = { A: "ক", B: "খ", C: "গ", D: "ঘ" };
-      const displaySet = isBangla ? (banglaSetMap[paper.setName!.trim().toUpperCase()] || paper.setName) : paper.setName;
-      const setBadgeText = isBangla ? `সেট: ${displaySet}` : `Set: ${displaySet}`;
-      const badgeW = 64;
-      const badgeH = 18;
-      const badgeX = page.width - page.marginSide - badgeW;
-      const badgeY = currentY;
+  if (hasSet) {
+    const banglaSetMap: Record<string, string> = { A: "ক", B: "খ", C: "গ", D: "ঘ" };
+    const displaySet = isBangla ? (banglaSetMap[paper.setName!.trim().toUpperCase()] || paper.setName) : paper.setName;
+    const setBadgeText = isBangla ? `সেট: ${displaySet}` : `Set: ${displaySet}`;
+    const badgeW = 60;
+    const badgeH = 18;
+    const badgeX = page.width - page.marginSide - badgeW;
+    const badgeY = currentY;
 
-      doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3).fillColor("#f0fdfa").fill();
-      doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3).strokeColor("#0d9488").lineWidth(0.8).stroke();
-      drawPdfText(doc, setBadgeText, badgeX, badgeY + 3, hasBanglaFont, {
-        width: badgeW,
-        align: "center",
-        fontSize: 10,
-        bold: true,
-        color: "#0f766e"
-      });
-    }
+    doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3).fillColor("#f0fdfa").fill();
+    doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3).strokeColor("#0d9488").lineWidth(0.8).stroke();
+    drawPdfText(doc, setBadgeText, badgeX, badgeY + 3, hasBanglaFont, {
+      width: badgeW,
+      align: "center",
+      fontSize: 9.5,
+      bold: true,
+      color: "#0f766e"
+    });
+  }
 
-    if (hasInstLogo && instLogoAsset) {
-      try {
-        const logoSize = 22;
-        doc.image(instLogoAsset.buffer, page.marginSide, currentY - 1, { height: logoSize, width: logoSize });
-      } catch {}
-    }
+  if (hasInstLogo && instLogoAsset) {
+    try {
+      const logoH = 30;
+      const aspect = instLogoAsset.width && instLogoAsset.height ? instLogoAsset.width / instLogoAsset.height : 1;
+      const logoW = Math.min(80, Math.round(logoH * aspect)) || 30;
+      const logoX = Math.round((page.width - logoW) / 2);
+      doc.image(instLogoAsset.buffer, logoX, currentY, { width: logoW, height: logoH });
+      currentY += logoH + 4;
+    } catch {}
+  }
 
-    if (hasInstitute) {
-      const logoOffset = hasInstLogo ? 28 : 0;
-      const rightReserved = hasSet ? 74 : (hasInstLogo ? 28 : 0);
-      const instWidth = headerWidth - logoOffset - rightReserved;
-      drawPdfText(doc, paper.institute!.trim(), page.marginSide + logoOffset, currentY + 1, hasBanglaFont, {
-        width: instWidth,
-        align: hasInstLogo ? "left" : "center",
-        fontSize: 13,
-        bold: true,
-        color: "#0f766e"
-      });
-    }
-
-    currentY += 24;
-  } else {
-    currentY = 24;
+  if (hasInstitute) {
+    drawPdfText(doc, paper.institute!.trim(), page.marginSide, currentY, hasBanglaFont, {
+      width: headerWidth,
+      align: "center",
+      fontSize: 14,
+      bold: true,
+      color: "#0f766e"
+    });
+    const instH = measurePdfText(doc, paper.institute!.trim(), headerWidth, 14, hasBanglaFont, true);
+    currentY += Math.max(18, instH + 5);
+  } else if (!hasInstLogo) {
+    currentY = hasSet ? 36 : 24;
   }
 
   // 2. Exam Name / Title (Centered, bold, prominent - full width without collision)
@@ -1589,9 +1588,21 @@ function paginateTwoColumnSection(
   while (currentIdx < questions.length) {
     const startY = pageIndex === 0 ? firstPageStartY : subsequentStartY;
     const maxColHeight = maxPageY - startY;
+    const pageCap = questionsPerPage > 0 ? questionsPerPage : Infinity;
 
-    const maxLeftCapacity = questionsPerPage > 0 ? Math.ceil(questionsPerPage / 2) : Infinity;
-    const maxPageCapacity = questionsPerPage > 0 ? questionsPerPage : Infinity;
+    // Dynamically calculate balanced question distribution across left and right columns
+    let fitCount = 0;
+    let accumH = 0;
+    for (let i = currentIdx; i < questions.length && fitCount < pageCap; i++) {
+      const qH = measureQuestionHeight(doc, questions[i], startIndex + i, columnWidth, images, hasBanglaFont, optionLabelStyle);
+      if (accumH + qH > maxColHeight * 2 && fitCount >= 2) {
+        break;
+      }
+      accumH += qH;
+      fitCount++;
+    }
+
+    const targetLeftCount = Math.max(1, Math.ceil(fitCount / 2));
 
     // 1. Fill Left Column
     const left: Array<{ question: Question; index: number }> = [];
@@ -1602,10 +1613,13 @@ function paginateTwoColumnSection(
       const globalIdx = startIndex + currentIdx;
       const h = measureQuestionHeight(doc, q, globalIdx, columnWidth, images, hasBanglaFont, optionLabelStyle);
 
-      // If left already has questions and this question cannot fit (or count reaches column capacity):
-      // STOP! It must NOT be put on the left side!
-      // It shifts to the right side of the page!
-      if (left.length > 0 && (leftH + h > maxColHeight || left.length >= maxLeftCapacity)) {
+      // If left column already has questions and this question cannot fit (or reached target balance):
+      if (left.length > 0 && (leftH + h > maxColHeight || left.length >= targetLeftCount)) {
+        break;
+      }
+
+      // If this is pageIndex 0 and the first question cannot fit at all in the remaining space of page 0:
+      if (left.length === 0 && h > maxColHeight + 30 && pageIndex === 0 && startY > subsequentStartY + 50) {
         break;
       }
 
@@ -1623,14 +1637,11 @@ function paginateTwoColumnSection(
       const globalIdx = startIndex + currentIdx;
       const h = measureQuestionHeight(doc, q, globalIdx, columnWidth, images, hasBanglaFont, optionLabelStyle);
 
-      // If right already has questions and this question cannot fit (or count reaches page capacity):
-      // STOP! It cannot fit on the right side either!
-      // It shifts to the NEXT PAGE!
-      if (right.length > 0 && (rightH + h > maxColHeight || (left.length + right.length) >= maxPageCapacity)) {
+      if (right.length > 0 && (rightH + h > maxColHeight || (left.length + right.length) >= pageCap)) {
         break;
       }
 
-      if (right.length === 0 && left.length > 0 && h > maxColHeight && pageIndex === 0) {
+      if (right.length === 0 && left.length > 0 && h > maxColHeight + 20) {
         break;
       }
 
@@ -1639,8 +1650,15 @@ function paginateTwoColumnSection(
       currentIdx++;
     }
 
-    pages.push({ startY, left, right });
-    pageIndex++;
+    if (left.length > 0 || right.length > 0) {
+      pages.push({ startY, left, right });
+      pageIndex++;
+    } else if (pageIndex === 0 && startY > subsequentStartY + 50) {
+      firstPageStartY = subsequentStartY;
+      continue;
+    } else {
+      break;
+    }
   }
 
   return pages.length ? pages : [{ startY: firstPageStartY, left: [], right: [] }];
@@ -1686,13 +1704,25 @@ function paginateSingleColumnSection(
         break;
       }
 
+      // If pageIndex 0 and even the very first question cannot fit in remainder space:
+      if (pageQuestions.length === 0 && h > maxPageHeight + 30 && pageIndex === 0 && startY > subsequentStartY + 50) {
+        break;
+      }
+
       pageQuestions.push({ question: q, index: globalIdx });
       currentH += h;
       currentIdx++;
     }
 
-    pages.push({ startY, questions: pageQuestions });
-    pageIndex++;
+    if (pageQuestions.length > 0) {
+      pages.push({ startY, questions: pageQuestions });
+      pageIndex++;
+    } else if (pageIndex === 0 && startY > subsequentStartY + 50) {
+      firstPageStartY = subsequentStartY;
+      continue;
+    } else {
+      break;
+    }
   }
 
   return pages.length ? pages : [{ startY: firstPageStartY, questions: [] }];
@@ -1849,10 +1879,9 @@ function drawQuestions(
 
     if (mcqs.length > 0) {
       if (isSingleFlow) {
-        // Continuous / Single page flow: if there is empty space after MCQs, start immediately; no CQ heading
-        const firstCqH = measureQuestionHeight(doc, cqs[0], mcqs.length, cqColWidth, images, hasBanglaFont, paper.optionLabelStyle);
-        const spaceNeededForFirstCq = firstCqH + 10;
-        if (maxPageY - currentY < spaceNeededForFirstCq) {
+        // Continuous / Single page flow: start CQ immediately in the same page flow below MCQs without a page break,
+        // unless virtually no space (< 60pt) remains at the very bottom of the page.
+        if (maxPageY - currentY < 60) {
           doc.addPage();
           currentY = 34;
         } else {
@@ -2176,7 +2205,8 @@ function buildDocxBodyForPaper(
   paper: Paper,
   images: ImageMap,
   options?: { withAnswer?: boolean; allSets?: boolean; sectionFlow?: "separate" | "single"; branding?: boolean; watermark?: boolean },
-  isFirstPaper = true
+  isFirstPaper = true,
+  instLogo?: ImageAsset | null
 ): Array<Paragraph | Table> {
   const cleanName = formatMathForExport(paper.name);
   const cleanInstructions = paper.instructions ? formatMathForExport(paper.instructions) : "";
@@ -2227,6 +2257,19 @@ function buildDocxBodyForPaper(
   // Header
   const headerChildren: Paragraph[] = [
     ...(isFirstPaper ? [] : [new Paragraph({ text: "", pageBreakBefore: true })]),
+    ...(canBrand && instLogo?.buffer ? [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 60 },
+        children: [
+          new ImageRun({
+            data: instLogo.buffer,
+            transformation: { width: 36, height: 36 },
+            type: imageType(instLogo.buffer)
+          })
+        ]
+      })
+    ] : []),
     ...(canBrand && paper.institute?.trim() ? [paragraph(paper.institute.trim(), { bold: true, size: 28, center: true, spacing: { after: 30 } })] : []),
     paragraph(titleWithSet, { bold: true, size: 32, center: true, spacing: { after: 60 } }),
     paragraph(docxSubHeader, {
@@ -2388,7 +2431,10 @@ export async function renderPaperDocx(
     watermark?: boolean;
   }
 ) {
-  const images = await loadQuestionImages(paper);
+  const [images, instLogo] = await Promise.all([
+    loadQuestionImages(paper),
+    options?.branding !== false && paper.instituteLogo ? loadSingleImage(paper.instituteLogo) : Promise.resolve(null)
+  ]);
   const bodyChildren: Array<Paragraph | Table> = [];
 
   if (options?.allSets) {
@@ -2396,11 +2442,11 @@ export async function renderPaperDocx(
     for (let sIdx = 0; sIdx < setKeys.length; sIdx++) {
       const sKey = setKeys[sIdx];
       const setPaper = createSetPaper(paper, sKey);
-      const setChildren = buildDocxBodyForPaper(setPaper, images, options, sIdx === 0);
+      const setChildren = buildDocxBodyForPaper(setPaper, images, options, sIdx === 0, instLogo);
       bodyChildren.push(...setChildren);
     }
   } else {
-    bodyChildren.push(...buildDocxBodyForPaper(paper, images, options, true));
+    bodyChildren.push(...buildDocxBodyForPaper(paper, images, options, true, instLogo));
   }
 
   const footers = options?.watermark

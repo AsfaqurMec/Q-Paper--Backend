@@ -25,7 +25,14 @@ import {
 } from "docx";
 import type { Paper, Question } from "../shared/types.js";
 import { formatMathForExport, convertBracketMatricesToLatex } from "./mathExportFormatter.js";
-import { getBengaliClass, getBengaliSubject } from "../curriculum/curriculumBengali.js";
+import {
+  getBengaliClass,
+  getBengaliSubject,
+  getBengaliPaperTitle,
+  getBengaliExamType,
+  formatBengaliDuration,
+  toBengaliDigits
+} from "../curriculum/curriculumBengali.js";
 
 type ImageAsset = { buffer: Buffer; width: number; height: number };
 type ImageMap = Map<string, ImageAsset>;
@@ -1135,31 +1142,16 @@ function measurePdfText(
   return h;
 }
 
-const toBengaliDigits = (n: number | string) =>
-  String(n).replace(/[0-9]/g, (d) => ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"][Number(d)]);
-
 function drawHeader(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolean): number {
   const isBangla = hasBanglaFont && (/[\u0980-\u09FF]/.test(paper.name + paper.subject) || !paper.subject?.toLowerCase().includes("english"));
-  let cleanName = formatMathForExport(paper.name);
-  if (isBangla) {
-    cleanName = cleanName
-      .replace(/\bModel Test\b/gi, "মডেল টেস্ট")
-      .replace(/\bFinal Exam\b/gi, "বার্ষিক পরীক্ষা")
-      .replace(/\bTest Exam\b/gi, "নির্বাচনী পরীক্ষা");
-  }
+  const cleanName = isBangla
+    ? getBengaliPaperTitle(paper.name, paper.className, paper.subject)
+    : formatMathForExport(paper.name);
   const cleanInstructions = paper.instructions ? formatMathForExport(paper.instructions) : "";
   const headerWidth = page.width - page.marginSide * 2;
 
   // Format Duration & Marks cleanly
-  let durationFormatted = paper.duration || (isBangla ? "২ ঘণ্টা" : "2 hours");
-  if (isBangla) {
-    durationFormatted = durationFormatted
-      .replace(/(\d+)\s*(?:hours?|hrs?|hr|h)\b/gi, (_, n) => `${toBengaliDigits(n)} ঘণ্টা`)
-      .replace(/(\d+)\s*(?:minutes?|mins?|min|m)\b/gi, (_, n) => `${toBengaliDigits(n)} মিনিট`)
-      .replace(/মিনিটs\b/gi, "মিনিট")
-      .replace(/\s*s\b/gi, "");
-    durationFormatted = toBengaliDigits(durationFormatted);
-  }
+  const durationFormatted = isBangla ? formatBengaliDuration(paper.duration) : (paper.duration || "2 hours");
   const timeText = isBangla ? `সময়: ${durationFormatted}` : `Time: ${paper.duration}`;
   const marksText = isBangla ? `পূর্ণমান: ${toBengaliDigits(paper.totalMarks)}` : `Marks: ${paper.totalMarks}`;
 
@@ -1928,7 +1920,11 @@ function drawAnswers(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boole
   let y = 36;
   const contentWidth = page.width - page.marginSide * 2;
   const isBangla = hasBanglaFont && (paper.optionLabelStyle === "bangla" || /[\u0980-\u09FF]/.test(paper.name + paper.subject) || !paper.subject.toLowerCase().includes("english"));
-  drawPdfText(doc, isBangla ? "উত্তরমালা ও ব্যাখ্যা (Answer Key)" : "Answer and Explanation", page.marginSide, y, hasBanglaFont, {
+  const ansHeading = isBangla ? "উত্তরমালা ও ব্যাখ্যা" : "Answer and Explanation";
+  const ansLabel = isBangla ? "উত্তর:" : "Answer:";
+  const expLabel = isBangla ? "ব্যাখ্যা:" : "Explanation:";
+
+  drawPdfText(doc, ansHeading, page.marginSide, y, hasBanglaFont, {
     fontSize: 16,
     bold: true
   });
@@ -1960,7 +1956,7 @@ function drawAnswers(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boole
         const label = getCqSubQuestionLabel(item.label, itemIndex, isBangla);
         const cleanAnswer = formatMathForExport(item.answer || "-");
         const cleanExplanation = item.explanation ? formatMathForExport(item.explanation) : "";
-        const text = `${label} Answer: ${cleanAnswer}${cleanExplanation ? ` | Explanation: ${cleanExplanation}` : ""}`;
+        const text = `${label} ${ansLabel} ${cleanAnswer}${cleanExplanation ? ` | ${expLabel} ${cleanExplanation}` : ""}`;
         drawPdfText(doc, text, page.marginSide + 16, y, hasBanglaFont, {
           width: contentWidth - 16,
           fontSize: 10,
@@ -1976,7 +1972,7 @@ function drawAnswers(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boole
       const cleanCorrectText = correct ? formatMathForExport(correct.text) : "-";
       const cleanExplanation = question.explanation ? formatMathForExport(question.explanation) : "";
       const correctLabel = correct ? getOptionExportLabel(correct, correctIndex, paper.optionLabelStyle, isBangla) : "";
-      const text = `Answer: ${correct ? `${correctLabel} ${cleanCorrectText}` : "-"}${cleanExplanation ? ` | Explanation: ${cleanExplanation}` : ""}`;
+      const text = `${ansLabel} ${correct ? `${correctLabel} ${cleanCorrectText}` : "-"}${cleanExplanation ? ` | ${expLabel} ${cleanExplanation}` : ""}`;
       drawPdfText(doc, text, page.marginSide + 16, y, hasBanglaFont, {
         width: contentWidth - 16,
         fontSize: 10,
@@ -2048,28 +2044,16 @@ function buildDocxBodyForPaper(
   const displaySet = paper.setName
     ? (isBangla ? (banglaSetMap[paper.setName.toUpperCase()] || paper.setName) : paper.setName)
     : "";
-  let docxTitle = cleanName;
-  if (isBangla) {
-    docxTitle = docxTitle
-      .replace(/\bModel Test\b/gi, "মডেল টেস্ট")
-      .replace(/\bFinal Exam\b/gi, "বার্ষিক পরীক্ষা")
-      .replace(/\bTest Exam\b/gi, "নির্বাচনী পরীক্ষা");
-  }
+  let docxTitle = isBangla
+    ? getBengaliPaperTitle(paper.name, paper.className, paper.subject)
+    : cleanName;
   const titleWithSet = paper.setName
     ? `${docxTitle} (${isBangla ? `সেট: ${displaySet}` : `Set: ${displaySet}`})`
     : docxTitle;
 
   const docxClass = isBangla ? getBengaliClass(paper.className) : paper.className;
   const docxSubject = isBangla ? getBengaliSubject(paper.subject) : paper.subject;
-  let docxDuration = paper.duration || (isBangla ? "২ ঘণ্টা" : "2 hours");
-  if (isBangla) {
-    docxDuration = docxDuration
-      .replace(/(\d+)\s*(?:hours?|hrs?|hr|h)\b/gi, (_, n) => `${toBengaliDigits(n)} ঘণ্টা`)
-      .replace(/(\d+)\s*(?:minutes?|mins?|min|m)\b/gi, (_, n) => `${toBengaliDigits(n)} মিনিট`)
-      .replace(/মিনিটs\b/gi, "মিনিট")
-      .replace(/\s*s\b/gi, "");
-    docxDuration = toBengaliDigits(docxDuration);
-  }
+  const docxDuration = isBangla ? formatBengaliDuration(paper.duration) : (paper.duration || "2 hours");
   const docxTime = isBangla ? `সময়: ${docxDuration}` : `Time: ${paper.duration}`;
   const docxMarks = isBangla ? `পূর্ণমান: ${toBengaliDigits(paper.totalMarks)}` : `Marks: ${paper.totalMarks}`;
   const docxClassLabel = isBangla ? `শ্রেণি: ${docxClass}` : `Class: ${paper.className}`;
@@ -2079,6 +2063,7 @@ function buildDocxBodyForPaper(
   // Header
   const headerChildren: Paragraph[] = [
     ...(isFirstPaper ? [] : [new Paragraph({ text: "", pageBreakBefore: true })]),
+    ...(paper.institute?.trim() ? [paragraph(paper.institute.trim(), { bold: true, size: 28, center: true, spacing: { after: 30 } })] : []),
     paragraph(titleWithSet, { bold: true, size: 32, center: true, spacing: { after: 60 } }),
     paragraph(docxSubHeader, {
       center: true,
@@ -2219,7 +2204,7 @@ function buildDocxBodyForPaper(
   // Answer Key on new page (if requested)
   if (options?.withAnswer !== false) {
     bodyChildren.push(new Paragraph({ text: "", pageBreakBefore: true }));
-    const answerHeading = isBangla ? "উত্তরমালা ও ব্যাখ্যা (Answer Key)" : "Answer and Explanation";
+    const answerHeading = isBangla ? "উত্তরমালা ও ব্যাখ্যা" : "Answer and Explanation";
     bodyChildren.push(paragraph(answerHeading, { bold: true, size: 26, spacing: { after: 100 } }));
     paper.questions.forEach((question, index) => {
       bodyChildren.push(...docxAnswer(question, index, paper.optionLabelStyle, isBangla));
@@ -2431,6 +2416,9 @@ function docxAnswer(
 ) {
   const serial = getQuestionDisplaySerial(question, index);
   const cleanTitle = getCleanQuestionTitle(question.title);
+  const ansLabel = isBangla ? "উত্তর:" : "Answer:";
+  const expLabel = isBangla ? "ব্যাখ্যা:" : "Explanation:";
+
   const children = [
     paragraph(`${serial}\t${cleanTitle}`, {
       bold: true,
@@ -2449,7 +2437,7 @@ function docxAnswer(
           indent: { left: 360 },
           spacing: { after: 20 },
           children: docxMathChildren(
-            `${label} Answer: ${cleanAnswer}${cleanExplanation ? ` | Explanation: ${cleanExplanation}` : ""}`,
+            `${label} ${ansLabel} ${cleanAnswer}${cleanExplanation ? ` | ${expLabel} ${cleanExplanation}` : ""}`,
             { size: 22 }
           )
         })
@@ -2467,7 +2455,7 @@ function docxAnswer(
         indent: { left: 360 },
         spacing: { after: 30 },
         children: docxMathChildren(
-          `Answer: ${correct ? `${correctLabel} ${cleanOptionText}` : "-"}${cleanExplanation ? ` | Explanation: ${cleanExplanation}` : ""}`,
+          `${ansLabel} ${correct ? `${correctLabel} ${cleanOptionText}` : "-"}${cleanExplanation ? ` | ${expLabel} ${cleanExplanation}` : ""}`,
           { size: 22 }
         )
       })

@@ -312,3 +312,139 @@ export function getBengaliChapter(chapterName?: string | null): string {
 
   return trimmed;
 }
+
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export const EXAM_TYPE_BENGALI_MAP: Record<string, string> = {
+  "Model Test": "মডেল টেস্ট",
+  "Class Test": "শ্রেণি পরীক্ষা",
+  "Half-Yearly Exam": "অর্ধ-বার্ষিক পরীক্ষা",
+  "Half-Yearly Examination": "অর্ধ-বার্ষিক পরীক্ষা",
+  "Half-Yearly": "অর্ধ-বার্ষিক",
+  "Annual Exam": "বার্ষিক পরীক্ষা",
+  "Annual Examination": "বার্ষিক পরীক্ষা",
+  "Final Exam": "বার্ষিক পরীক্ষা",
+  "Final Examination": "বার্ষিক পরীক্ষা",
+  "Pre-Test Exam": "প্রাক-নির্বাচনী পরীক্ষা",
+  "Pre-Test Examination": "প্রাক-নির্বাচনী পরীক্ষা",
+  "Pre-Test": "প্রাক-নির্বাচনী",
+  "Test Exam": "নির্বাচনী পরীক্ষা",
+  "Test Examination": "নির্বাচনী পরীক্ষা",
+  "Weekly Quiz": "সাপ্তাহিক কুইজ",
+  "Admission Test": "ভর্তি পরীক্ষা"
+};
+
+export function getBengaliExamType(examType?: string | null): string {
+  if (!examType) return "";
+  if (/[\u0980-\u09FF]/.test(examType)) return examType;
+  const trimmed = examType.trim();
+  return EXAM_TYPE_BENGALI_MAP[trimmed] || trimmed;
+}
+
+export function formatBengaliDuration(duration?: string | null): string {
+  if (!duration) return "২ ঘণ্টা";
+  let str = duration.trim();
+  str = str
+    .replace(/(\d+)\s*(?:hours?|hrs?|hr|h)\b/gi, (_, n) => `${toBengaliDigits(n)} ঘণ্টা`)
+    .replace(/(\d+)\s*(?:minutes?|mins?|min|m)\b/gi, (_, n) => `${toBengaliDigits(n)} মিনিট`)
+    .replace(/মিনিটs\b/gi, "মিনিট")
+    .replace(/\s*s\b/gi, "");
+  return toBengaliDigits(str);
+}
+
+export function getBengaliPaperTitle(title?: string | null, className?: string | null, subject?: string | null): string {
+  if (!title) {
+    const cls = getBengaliClass(className);
+    const subj = getBengaliSubject(subject);
+    return [cls, subj, "মডেল টেস্ট"].filter(Boolean).join(" ") || "প্রশ্নপত্র";
+  }
+
+  let result = title.trim();
+
+  // 1. Classes replacement (longest first to avoid substring collision)
+  const sortedClasses = Object.entries(CLASS_BENGALI_MAP).sort((a, b) => b[0].length - a[0].length);
+  for (const [enCls, bnCls] of sortedClasses) {
+    const regex = new RegExp(escapeRegExp(enCls), "gi");
+    result = result.replace(regex, bnCls);
+  }
+
+  // 2. Subjects replacement (longest first)
+  const sortedSubjects = Object.entries(SUBJECT_BENGALI_MAP).sort((a, b) => b[0].length - a[0].length);
+  for (const [enSubj, bnSubj] of sortedSubjects) {
+    const regex = new RegExp(escapeRegExp(enSubj), "gi");
+    result = result.replace(regex, bnSubj);
+  }
+
+  // 3. Chapters replacement
+  for (const [enChap, bnChap] of Object.entries(CHAPTER_TITLE_MAP)) {
+    const regex = new RegExp(escapeRegExp(enChap), "gi");
+    result = result.replace(regex, bnChap);
+  }
+
+  // 4. Common exam and syllabus terms
+  result = result
+    .replace(/\bFull Subject Model Test\b/gi, "সম্পূর্ণ বিষয় মডেল টেস্ট")
+    .replace(/\bFull Subject\b/gi, "সম্পূর্ণ পাঠ্যক্রম")
+    .replace(/\bFull Syllabus\b/gi, "সম্পূর্ণ সিলেবাস")
+    .replace(/\bComplete Syllabus\b/gi, "সম্পূর্ণ সিলেবাস")
+    .replace(/\bModel Test\b/gi, "মডেল টেস্ট")
+    .replace(/\bFinal Exam(?:ination)?\b/gi, "বার্ষিক পরীক্ষা")
+    .replace(/\bAnnual Exam(?:ination)?\b/gi, "বার্ষিক পরীক্ষা")
+    .replace(/\bPre-Test Exam(?:ination)?\b/gi, "প্রাক-নির্বাচনী পরীক্ষা")
+    .replace(/\bPre-Test\b/gi, "প্রাক-নির্বাচনী")
+    .replace(/\bTest Exam(?:ination)?\b/gi, "নির্বাচনী পরীক্ষা")
+    .replace(/\bHalf-Yearly Exam(?:ination)?\b/gi, "অর্ধ-বার্ষিক পরীক্ষা")
+    .replace(/\bHalf-Yearly\b/gi, "অর্ধ-বার্ষিক")
+    .replace(/\bClass Test\b/gi, "শ্রেণি পরীক্ষা")
+    .replace(/\bWeekly Quiz\b/gi, "সাপ্তাহিক কুইজ")
+    .replace(/\bQuestion Paper\b/gi, "প্রশ্নপত্র")
+    .replace(/\bExamination\b/gi, "পরীক্ষা")
+    .replace(/\bExam\b/gi, "পরীক্ষা")
+    .replace(/\bQuestion\b/gi, "প্রশ্ন")
+    .replace(/\bChapter\b/gi, "অধ্যায়")
+    .replace(/\bCh\.?\s*(\d+)/gi, (_, n) => `অধ্যায় ${toBengaliDigits(n)}`);
+
+  // 5. Convert any English digits
+  result = toBengaliDigits(result);
+
+  // 6. Clean spaces and dashes
+  result = result.replace(/\s+/g, " ").trim();
+
+  return result;
+}
+
+export function sanitizeUnicodeFileName(value: string): string {
+  return value
+    .replace(/[/\\?%*:|"<>#]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "প্রশ্নপত্র";
+}
+
+export function getBengaliExportFileName(opts: {
+  paperName?: string | null;
+  className?: string | null;
+  subject?: string | null;
+  setName?: string | null;
+  isAllSets?: boolean;
+  withAnswer?: boolean;
+  format: "pdf" | "docx";
+}): string {
+  const bnTitle = getBengaliPaperTitle(opts.paperName, opts.className, opts.subject);
+  const safeTitle = sanitizeUnicodeFileName(bnTitle);
+
+  let setSuffix = "";
+  if (opts.isAllSets) {
+    setSuffix = "-সকল-সেট";
+  } else if (opts.setName && opts.setName.toLowerCase() !== "none" && opts.setName.toLowerCase() !== "original") {
+    const banglaSetMap: Record<string, string> = { A: "ক", B: "খ", C: "গ", D: "ঘ", 1: "১", 2: "২", 3: "৩", 4: "৪" };
+    const cleanSet = opts.setName.trim();
+    const setLabel = banglaSetMap[cleanSet.toUpperCase()] || banglaSetMap[cleanSet] || cleanSet;
+    setSuffix = `-সেট-${setLabel}`;
+  }
+
+  const answerSuffix = opts.withAnswer ? "-উত্তরসহ" : "-প্রশ্নপত্র";
+  return `${safeTitle}${setSuffix}${answerSuffix}.${opts.format}`;
+}

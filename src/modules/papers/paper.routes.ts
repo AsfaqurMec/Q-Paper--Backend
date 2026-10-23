@@ -6,7 +6,7 @@ import { createPaper, deletePaper, duplicatePaper, getPaper, listPapers, setStat
 import { createPaperSchema, paperStatusSchema } from "./paper.schemas.js";
 import { createSetPaper, renderPaperDocx, renderPaperPdf } from "./paperExport.service.js";
 import type { Paper } from "../shared/types.js";
-import { getBengaliClass, getBengaliSubject } from "../curriculum/curriculumBengali.js";
+import { getBengaliClass, getBengaliSubject, getBengaliPaperTitle } from "../curriculum/curriculumBengali.js";
 import { QuestionBankItemModel } from "../question-bank/questionBank.models.js";
 
 export const paperRouter = Router();
@@ -188,18 +188,7 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
 
   let baseName = paper.name.trim();
   if (isBangla) {
-    if (!/[\u0980-\u09FF]/.test(baseName)) {
-      const bnCls = getBengaliClass(paper.className);
-      const bnSub = getBengaliSubject(paper.subject);
-      if (bnCls || bnSub) {
-        baseName = [bnCls, bnSub, "মডেল-টেস্ট"].filter(Boolean).join("-");
-      } else {
-        baseName = baseName
-          .replace(/\bModel Test\b/gi, "মডেল-টেস্ট")
-          .replace(/\bFinal Exam\b/gi, "বার্ষিক-পরীক্ষা")
-          .replace(/\bTest Exam\b/gi, "নির্বাচনী-পরীক্ষা");
-      }
-    }
+    baseName = getBengaliPaperTitle(paper.name, paper.className, paper.subject);
   }
 
   const dispositionHeader = getExportContentDisposition(baseName, `${fileSuffix}${answerSuffix}`, format);

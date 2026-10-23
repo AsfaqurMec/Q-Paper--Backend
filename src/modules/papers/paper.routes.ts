@@ -148,6 +148,11 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
     paper.questionsPerPage = Number(req.query.questionsPerPage);
   }
 
+  const sectionFlow =
+    req.query.sectionFlow === "single" || req.query.sectionFlow === "separate"
+      ? (req.query.sectionFlow as "single" | "separate")
+      : (paper.sectionFlow || "separate");
+
   const rawSet = req.query.set ? String(req.query.set).trim() : (paper.setName ? String(paper.setName).trim() : "");
   const isAllSets = rawSet.toLowerCase() === "all";
 
@@ -203,13 +208,13 @@ paperRouter.get("/:id/export/:format", asyncHandler(async (req, res) => {
     if (req.user!.plan !== "ultra" && req.user!.plan !== "diamond" && req.user!.role !== "admin") {
       throw new ApiError(403, "DOCX export is only available in the Ultra and Diamond packages. Please upgrade your plan.");
     }
-    const file = await renderPaperDocx(preparedPaper, { withAnswer, allSets: isAllSets });
+    const file = await renderPaperDocx(preparedPaper, { withAnswer, allSets: isAllSets, sectionFlow });
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", dispositionHeader);
     return res.send(file);
   }
   if (format === "pdf") {
-    const file = await renderPaperPdf(preparedPaper, { withAnswer, allSets: isAllSets });
+    const file = await renderPaperPdf(preparedPaper, { withAnswer, allSets: isAllSets, sectionFlow });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", dispositionHeader);
     return res.send(file);

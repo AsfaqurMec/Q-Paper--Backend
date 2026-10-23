@@ -61,6 +61,7 @@ const paperSchema = new Schema<Paper>(
     setName: { type: String },
     mcqSectionTitle: { type: String },
     cqSectionTitle: { type: String },
+    sectionFlow: { type: String, enum: ["separate", "single"] },
     status: { type: String, enum: ["draft", "published", "archived"], required: true, default: "draft", index: true },
     questions: { type: [questionSchema], default: [] },
     createdAt: { type: String, required: true },

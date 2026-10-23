@@ -40,6 +40,7 @@ export type Paper = {
   setName?: string;
   mcqSectionTitle?: string;
   cqSectionTitle?: string;
+  sectionFlow?: "separate" | "single";
   status: PaperStatus;
   questions: Question[];
   createdAt: string;

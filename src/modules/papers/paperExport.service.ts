@@ -142,7 +142,7 @@ export function createSetPaper(basePaper: Paper, setKey: string): Paper {
 
 export async function renderPaperPdf(
   paper: Paper,
-  options?: { withAnswer?: boolean; allSets?: boolean }
+  options?: { withAnswer?: boolean; allSets?: boolean; sectionFlow?: "separate" | "single" }
 ) {
   const images = await loadQuestionImages(paper);
   const doc = new PDFDocument({
@@ -170,6 +170,8 @@ export async function renderPaperPdf(
     doc.registerFont("BanglaFont-Bold", banglaFont);
   }
 
+  const effectiveSectionFlow = options?.sectionFlow || paper.sectionFlow || "separate";
+
   if (options?.allSets) {
     const setKeys = ["A", "B", "C", "D"];
     for (let sIdx = 0; sIdx < setKeys.length; sIdx++) {
@@ -179,14 +181,14 @@ export async function renderPaperPdf(
         doc.addPage();
       }
       const headerEndY = drawHeader(doc, setPaper, Boolean(banglaFont));
-      drawQuestions(doc, setPaper, images, Boolean(banglaFont), headerEndY);
+      drawQuestions(doc, setPaper, images, Boolean(banglaFont), headerEndY, effectiveSectionFlow);
       if (options?.withAnswer !== false) {
         drawAnswers(doc, setPaper, Boolean(banglaFont));
       }
     }
   } else {
     const headerEndY = drawHeader(doc, paper, Boolean(banglaFont));
-    drawQuestions(doc, paper, images, Boolean(banglaFont), headerEndY);
+    drawQuestions(doc, paper, images, Boolean(banglaFont), headerEndY, effectiveSectionFlow);
     if (options?.withAnswer !== false) {
       drawAnswers(doc, paper, Boolean(banglaFont));
     }
@@ -1578,7 +1580,8 @@ function drawQuestions(
   paper: Paper,
   images: ImageMap,
   hasBanglaFont: boolean,
-  headerEndY: number
+  headerEndY: number,
+  sectionFlow: "separate" | "single" = "separate"
 ) {
   const mcqLayout = paper.layout || "split";
   const cqLayout = paper.cqLayout || paper.layout || "split";
@@ -1688,20 +1691,30 @@ function drawQuestions(
   if (cqs.length > 0) {
     const isCqSplit = cqLayout === "split";
     const cqColWidth = isCqSplit ? columnWidth : printableWidth;
-    const bannerH = cqInstr ? 30 : 22;
-    const firstCqH = measureQuestionHeight(doc, cqs[0], mcqs.length, cqColWidth, images, hasBanglaFont, paper.optionLabelStyle);
-    const spaceNeededForFirstCq = bannerH + 6 + firstCqH + 16;
+    const isSingleFlow = sectionFlow === "single";
 
     if (mcqs.length > 0) {
-      if (maxPageY - currentY < spaceNeededForFirstCq) {
+      if (isSingleFlow) {
+        // Continuous / Single page flow: if there is empty space after MCQs, start immediately; no CQ heading
+        const firstCqH = measureQuestionHeight(doc, cqs[0], mcqs.length, cqColWidth, images, hasBanglaFont, paper.optionLabelStyle);
+        const spaceNeededForFirstCq = firstCqH + 10;
+        if (maxPageY - currentY < spaceNeededForFirstCq) {
+          doc.addPage();
+          currentY = 34;
+        } else {
+          currentY += 8;
+        }
+      } else {
+        // Separate page flow (default): force CQ to start on a new page
         doc.addPage();
         currentY = 34;
-      } else {
-        currentY += 8;
       }
     }
 
-    currentY = drawSectionHeadline(doc, cqTitle, cqInstr, currentY, printableWidth, hasBanglaFont);
+    // Only draw CQ headline if not single flow (or if no MCQs exist in the paper)
+    if (!isSingleFlow || mcqs.length === 0) {
+      currentY = drawSectionHeadline(doc, cqTitle, cqInstr, currentY, printableWidth, hasBanglaFont);
+    }
 
     if (isCqSplit) {
       const cqPages = paginateTwoColumnSection(
@@ -2004,7 +2017,7 @@ function docxSectionHeadline(title: string, instructions?: string): Paragraph[] 
 function buildDocxBodyForPaper(
   paper: Paper,
   images: ImageMap,
-  options?: { withAnswer?: boolean },
+  options?: { withAnswer?: boolean; allSets?: boolean; sectionFlow?: "separate" | "single" },
   isFirstPaper = true
 ): Array<Paragraph | Table> {
   const cleanName = formatMathForExport(paper.name);
@@ -2138,7 +2151,15 @@ function buildDocxBodyForPaper(
 
   // 2. CQ SECTION (DYNAMIC: 2 SPLIT LAYOUT OR SINGLE LAYOUT)
   if (cqs.length > 0) {
-    bodyChildren.push(...docxSectionHeadline(cqTitle, cqInstr));
+    const isSingleFlow = (options?.sectionFlow || paper.sectionFlow) === "single";
+
+    if (mcqs.length > 0 && !isSingleFlow) {
+      bodyChildren.push(new Paragraph({ text: "", pageBreakBefore: true }));
+    }
+
+    if (!isSingleFlow || mcqs.length === 0) {
+      bodyChildren.push(...docxSectionHeadline(cqTitle, cqInstr));
+    }
 
     if (isCqSplit) {
       const cqPerPage = paper.questionsPerPage > 0 ? paper.questionsPerPage : 6;
@@ -2210,7 +2231,7 @@ function buildDocxBodyForPaper(
 
 export async function renderPaperDocx(
   paper: Paper,
-  options?: { withAnswer?: boolean; allSets?: boolean }
+  options?: { withAnswer?: boolean; allSets?: boolean; sectionFlow?: "separate" | "single" }
 ) {
   const images = await loadQuestionImages(paper);
   const bodyChildren: Array<Paragraph | Table> = [];

@@ -1590,21 +1590,7 @@ function paginateTwoColumnSection(
     const maxColHeight = maxPageY - startY;
     const pageCap = questionsPerPage > 0 ? questionsPerPage : Infinity;
 
-    // Dynamically calculate balanced question distribution across left and right columns
-    let fitCount = 0;
-    let accumH = 0;
-    for (let i = currentIdx; i < questions.length && fitCount < pageCap; i++) {
-      const qH = measureQuestionHeight(doc, questions[i], startIndex + i, columnWidth, images, hasBanglaFont, optionLabelStyle);
-      if (accumH + qH > maxColHeight * 2 && fitCount >= 2) {
-        break;
-      }
-      accumH += qH;
-      fitCount++;
-    }
-
-    const targetLeftCount = Math.max(1, Math.ceil(fitCount / 2));
-
-    // 1. Fill Left Column
+    // 1. Fill Left Column FULLY first until bottom of column
     const left: Array<{ question: Question; index: number }> = [];
     let leftH = 0;
 
@@ -1613,12 +1599,12 @@ function paginateTwoColumnSection(
       const globalIdx = startIndex + currentIdx;
       const h = measureQuestionHeight(doc, q, globalIdx, columnWidth, images, hasBanglaFont, optionLabelStyle);
 
-      // If left column already has questions and this question cannot fit (or reached target balance):
-      if (left.length > 0 && (leftH + h > maxColHeight || left.length >= targetLeftCount)) {
+      // Stop left column ONLY when it physically cannot fit another question on the left side
+      if (left.length > 0 && (leftH + h > maxColHeight || left.length >= pageCap)) {
         break;
       }
 
-      // If this is pageIndex 0 and the first question cannot fit at all in the remaining space of page 0:
+      // If this is pageIndex 0 and the first question cannot fit in the remaining space of page 0:
       if (left.length === 0 && h > maxColHeight + 30 && pageIndex === 0 && startY > subsequentStartY + 50) {
         break;
       }
@@ -1796,6 +1782,58 @@ function drawQuestions(
 
   const maxPageY = page.height - page.marginBottom - 6;
   let currentY = headerEndY;
+  const isSingleFlow = sectionFlow === "single";
+
+  // CASE A: Both MCQ and CQ are split (2-column) and user chose single flow
+  // In this mode, questions flow seamlessly in 2 columns: left side fills fully first, then right side fills fully!
+  if (isSingleFlow && mcqLayout === "split" && cqLayout === "split" && hasBoth) {
+    currentY = drawSectionHeadline(doc, mcqTitle, mcqInstr, currentY, printableWidth, hasBanglaFont);
+    const allQuestions = [...mcqs, ...cqs];
+    const pages = paginateTwoColumnSection(
+      doc,
+      allQuestions,
+      0,
+      columnWidth,
+      images,
+      hasBanglaFont,
+      currentY,
+      perPage,
+      paper.optionLabelStyle
+    );
+
+    pages.forEach((p, pageIndex) => {
+      if (pageIndex > 0) {
+        doc.addPage();
+      }
+      const startY = p.startY;
+      const leftX = page.marginSide;
+      const rightX = page.marginSide + columnWidth + gutter;
+      const dividerX = page.marginSide + columnWidth + gutter / 2;
+
+      let leftY = startY;
+      p.left.forEach(({ question, index }) => {
+        leftY = drawQuestionCard(doc, question, index, leftX, leftY, columnWidth, images, hasBanglaFont, paper.optionLabelStyle);
+      });
+
+      let rightY = startY;
+      p.right.forEach(({ question, index }) => {
+        rightY = drawQuestionCard(doc, question, index, rightX, rightY, columnWidth, images, hasBanglaFont, paper.optionLabelStyle);
+      });
+
+      const dividerBottom = Math.max(leftY, rightY) - 4;
+      if (dividerBottom > startY && p.left.length > 0 && p.right.length > 0) {
+        doc
+          .moveTo(dividerX, startY)
+          .lineTo(dividerX, dividerBottom)
+          .strokeColor("#cbd5e1")
+          .lineWidth(0.6)
+          .stroke();
+      }
+
+      currentY = Math.max(leftY, rightY) + 8;
+    });
+    return;
+  }
 
   // 1. DRAW MCQ SECTION
   if (mcqs.length > 0) {
@@ -1875,7 +1913,6 @@ function drawQuestions(
   if (cqs.length > 0) {
     const isCqSplit = cqLayout === "split";
     const cqColWidth = isCqSplit ? columnWidth : printableWidth;
-    const isSingleFlow = sectionFlow === "single";
 
     if (mcqs.length > 0) {
       if (isSingleFlow) {

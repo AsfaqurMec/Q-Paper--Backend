@@ -39,13 +39,13 @@ import {
 type ImageAsset = { buffer: Buffer; width: number; height: number };
 type ImageMap = Map<string, ImageAsset>;
 
-// Reduced left & right margins for compact, authentic exam paper layout
+// Compact, authentic exam paper layout with maximized printable vertical area
 const page = {
   width: 595.28,
   height: 841.89,
-  marginSide: 26, // Reduced from 42pt to 26pt (~9mm)
-  marginTop: 32,
-  marginBottom: 32
+  marginSide: 24, // 24pt (~8.5mm)
+  marginTop: 22,   // 22pt (~7.7mm)
+  marginBottom: 20 // 20pt (~7.0mm)
 };
 
 function getMathFontPath(): { regular: string; bold: string } | null {
@@ -1306,7 +1306,7 @@ function drawHeader(
   const timeText = isBangla ? `সময়: ${durationFormatted}` : `Time: ${paper.duration}`;
   const marksText = isBangla ? `পূর্ণমান: ${toBengaliDigits(paper.totalMarks)}` : `Marks: ${paper.totalMarks}`;
 
-  let currentY = 22;
+  let currentY = 18;
 
   // 1. Top Bar: Set Badge & Institute Branding (Centered & perfectly aligned)
   const canBrand = options?.branding !== false;
@@ -1318,17 +1318,17 @@ function drawHeader(
     const banglaSetMap: Record<string, string> = { A: "ক", B: "খ", C: "গ", D: "ঘ" };
     const displaySet = isBangla ? (banglaSetMap[paper.setName!.trim().toUpperCase()] || paper.setName) : paper.setName;
     const setBadgeText = isBangla ? `সেট: ${displaySet}` : `Set: ${displaySet}`;
-    const badgeW = 60;
-    const badgeH = 18;
+    const badgeW = 56;
+    const badgeH = 16;
     const badgeX = page.width - page.marginSide - badgeW;
     const badgeY = currentY;
 
     doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3).fillColor("#f0fdfa").fill();
     doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3).strokeColor("#0d9488").lineWidth(0.8).stroke();
-    drawPdfText(doc, setBadgeText, badgeX, badgeY + 3, hasBanglaFont, {
+    drawPdfText(doc, setBadgeText, badgeX, badgeY + 2, hasBanglaFont, {
       width: badgeW,
       align: "center",
-      fontSize: 9.5,
+      fontSize: 9,
       bold: true,
       color: "#0f766e"
     });
@@ -1336,12 +1336,12 @@ function drawHeader(
 
   if (hasInstLogo && instLogoAsset) {
     try {
-      const logoH = 30;
+      const logoH = 26;
       const aspect = instLogoAsset.width && instLogoAsset.height ? instLogoAsset.width / instLogoAsset.height : 1;
-      const logoW = Math.min(80, Math.round(logoH * aspect)) || 30;
+      const logoW = Math.min(70, Math.round(logoH * aspect)) || 26;
       const logoX = Math.round((page.width - logoW) / 2);
       doc.image(instLogoAsset.buffer, logoX, currentY, { width: logoW, height: logoH });
-      currentY += logoH + 4;
+      currentY += logoH + 3;
     } catch {}
   }
 
@@ -1349,26 +1349,26 @@ function drawHeader(
     drawPdfText(doc, paper.institute!.trim(), page.marginSide, currentY, hasBanglaFont, {
       width: headerWidth,
       align: "center",
-      fontSize: 14,
+      fontSize: 13,
       bold: true,
       color: "#0f766e"
     });
-    const instH = measurePdfText(doc, paper.institute!.trim(), headerWidth, 14, hasBanglaFont, true);
-    currentY += Math.max(18, instH + 5);
+    const instH = measurePdfText(doc, paper.institute!.trim(), headerWidth, 13, hasBanglaFont, true);
+    currentY += Math.max(16, instH + 3);
   } else if (!hasInstLogo) {
-    currentY = hasSet ? 36 : 24;
+    currentY = hasSet ? 28 : 18;
   }
 
   // 2. Exam Name / Title (Centered, bold, prominent - full width without collision)
   drawPdfText(doc, cleanName, page.marginSide, currentY, hasBanglaFont, {
     width: headerWidth,
     align: "center",
-    fontSize: 17,
+    fontSize: 15,
     bold: true
   });
-  const nameHeight = measurePdfText(doc, cleanName, headerWidth, 17, hasBanglaFont, true);
+  const nameHeight = measurePdfText(doc, cleanName, headerWidth, 15, hasBanglaFont, true);
 
-  currentY += Math.max(22, nameHeight + 6);
+  currentY += Math.max(18, nameHeight + 3);
 
   // 3. Class & Subject Line (Centered, bold, distinct line)
   const bnClass = isBangla ? getBengaliClass(paper.className) : paper.className;
@@ -1379,45 +1379,45 @@ function drawHeader(
   drawPdfText(doc, classSubjectLine, page.marginSide, currentY, hasBanglaFont, {
     width: headerWidth,
     align: "center",
-    fontSize: 11.5,
+    fontSize: 10.5,
     bold: true,
     color: "#0f172a"
   });
-  currentY += 18;
+  currentY += 15;
 
   // 4. Time & Marks Line: Left-aligned Time, Right-aligned Marks (Zero collision!)
   drawPdfText(doc, timeText, page.marginSide + 4, currentY, hasBanglaFont, {
     width: headerWidth / 2,
     align: "left",
-    fontSize: 10.5,
+    fontSize: 10,
     color: "#334155"
   });
   drawPdfText(doc, marksText, page.marginSide + headerWidth / 2 - 4, currentY, hasBanglaFont, {
     width: headerWidth / 2,
     align: "right",
-    fontSize: 10.5,
+    fontSize: 10,
     bold: true,
     color: "#334155"
   });
-  currentY += 18;
+  currentY += 15;
 
   // 5. Instructions (if present)
   if (cleanInstructions) {
     drawPdfText(doc, cleanInstructions, page.marginSide, currentY, hasBanglaFont, {
       width: headerWidth,
       align: "center",
-      fontSize: 9.5,
+      fontSize: 9,
       color: "#475569"
     });
-    const instrHeight = measurePdfText(doc, cleanInstructions, headerWidth, 9.5, hasBanglaFont, false);
-    currentY += instrHeight + 5;
+    const instrHeight = measurePdfText(doc, cleanInstructions, headerWidth, 9, hasBanglaFont, false);
+    currentY += instrHeight + 3;
   } else {
-    currentY += 4;
+    currentY += 2;
   }
 
   // 6. Horizontal separator line
   doc.moveTo(page.marginSide, currentY).lineTo(page.width - page.marginSide, currentY).strokeColor("#cbd5e1").lineWidth(0.8).stroke();
-  return currentY + 10;
+  return currentY + 6;
 }
 
 function getQuestionDisplaySerial(question: Question, index: number): string {
@@ -1539,8 +1539,8 @@ function measureQuestionHeight(
       const label = getCqSubQuestionLabel(item.label, itemIndex, isBangla);
       const cleanItemText = formatMathForExport(item.text);
       const itemText = `${label} ${cleanItemText}`;
-      const itemHeight = Math.max(14, measurePdfText(doc, itemText, width - indent - 44, 10, hasBanglaFont, false));
-      subHeight += itemHeight + 3;
+      const itemHeight = Math.max(13, measurePdfText(doc, itemText, width - indent - 44, 10, hasBanglaFont, false));
+      subHeight += itemHeight + 2;
     });
   } else {
     const optionAreaWidth = width - indent;
@@ -1553,11 +1553,11 @@ function measureQuestionHeight(
       const t2 = opt2 ? `${getOptionExportLabel(opt2, i + 1, optionLabelStyle, isBangla)} ${formatMathForExport(opt2.text)}` : "";
       const h1 = t1 ? measurePdfText(doc, t1, optionColWidth - 4, 10, hasBanglaFont, false) : 0;
       const h2 = t2 ? measurePdfText(doc, t2, optionColWidth - 4, 10, hasBanglaFont, false) : 0;
-      optionsHeight += Math.max(14, Math.max(h1, h2)) + 2;
+      optionsHeight += Math.max(13, Math.max(h1, h2)) + 1.5;
     }
   }
 
-  const totalH = titleHeight + 2 + subtitleHeight + imageHeight + (question.type === "cq" ? subHeight : optionsHeight) + 8;
+  const totalH = titleHeight + 2 + subtitleHeight + imageHeight + (question.type === "cq" ? subHeight : optionsHeight) + 5;
   cache.measurePdfTextCache.set(qKey, totalH);
   return totalH;
 }
@@ -1577,18 +1577,22 @@ function paginateTwoColumnSection(
   hasBanglaFont: boolean,
   firstPageStartY: number,
   questionsPerPage: number,
-  optionLabelStyle?: string
+  optionLabelStyle?: string,
+  isSingleFlow: boolean = false
 ): TwoColumnPage[] {
   const pages: TwoColumnPage[] = [];
   let currentIdx = 0;
   let pageIndex = 0;
-  const maxPageY = page.height - page.marginBottom - 6;
+  const maxPageY = page.height - page.marginBottom - 4;
   const subsequentStartY = page.marginTop + 2;
+  // Tolerance allows a question that only slightly exceeds maxColHeight to fit comfortably
+  // without creating a huge 150-200pt void at the bottom of the column!
+  const tolerance = 18;
 
   while (currentIdx < questions.length) {
     const startY = pageIndex === 0 ? firstPageStartY : subsequentStartY;
     const maxColHeight = maxPageY - startY;
-    const pageCap = questionsPerPage > 0 ? questionsPerPage : Infinity;
+    const pageCap = (isSingleFlow || !questionsPerPage || questionsPerPage <= 0) ? Infinity : questionsPerPage;
 
     // 1. Fill Left Column FULLY first until bottom of column
     const left: Array<{ question: Question; index: number }> = [];
@@ -1600,12 +1604,12 @@ function paginateTwoColumnSection(
       const h = measureQuestionHeight(doc, q, globalIdx, columnWidth, images, hasBanglaFont, optionLabelStyle);
 
       // Stop left column ONLY when it physically cannot fit another question on the left side
-      if (left.length > 0 && (leftH + h > maxColHeight || left.length >= pageCap)) {
+      if (left.length > 0 && (leftH + h > maxColHeight + tolerance || left.length >= pageCap)) {
         break;
       }
 
       // If this is pageIndex 0 and the first question cannot fit in the remaining space of page 0:
-      if (left.length === 0 && h > maxColHeight + 30 && pageIndex === 0 && startY > subsequentStartY + 50) {
+      if (left.length === 0 && h > maxColHeight + 35 && pageIndex === 0 && startY > subsequentStartY + 50) {
         break;
       }
 
@@ -1623,11 +1627,11 @@ function paginateTwoColumnSection(
       const globalIdx = startIndex + currentIdx;
       const h = measureQuestionHeight(doc, q, globalIdx, columnWidth, images, hasBanglaFont, optionLabelStyle);
 
-      if (right.length > 0 && (rightH + h > maxColHeight || (left.length + right.length) >= pageCap)) {
+      if (right.length > 0 && (rightH + h > maxColHeight + tolerance || (left.length + right.length) >= pageCap)) {
         break;
       }
 
-      if (right.length === 0 && left.length > 0 && h > maxColHeight + 20) {
+      if (right.length === 0 && left.length > 0 && h > maxColHeight + 25) {
         break;
       }
 
@@ -1722,27 +1726,27 @@ function drawSectionHeadline(
   width: number,
   hasBanglaFont: boolean
 ): number {
-  const bannerHeight = instructions ? 30 : 22;
+  const bannerHeight = instructions ? 25 : 19;
   doc.rect(page.marginSide, y, width, bannerHeight).fillColor("#f1f5f9").fill();
   doc.rect(page.marginSide, y, width, bannerHeight).strokeColor("#cbd5e1").lineWidth(0.8).stroke();
 
   // Full-width section title (no score/number text as requested)
-  drawPdfText(doc, title, page.marginSide + 8, y + 4, hasBanglaFont, {
+  drawPdfText(doc, title, page.marginSide + 8, y + 3, hasBanglaFont, {
     width: width - 16,
-    fontSize: 11,
+    fontSize: 10.5,
     bold: true,
     color: "#0f172a"
   });
 
   if (instructions) {
-    drawPdfText(doc, instructions, page.marginSide + 8, y + 17, hasBanglaFont, {
+    drawPdfText(doc, instructions, page.marginSide + 8, y + 14, hasBanglaFont, {
       width: width - 16,
-      fontSize: 8.5,
+      fontSize: 8,
       color: "#475569"
     });
   }
 
-  return y + bannerHeight + 6;
+  return y + bannerHeight + 5;
 }
 
 function drawQuestions(
@@ -1798,7 +1802,8 @@ function drawQuestions(
       hasBanglaFont,
       currentY,
       perPage,
-      paper.optionLabelStyle
+      paper.optionLabelStyle,
+      isSingleFlow
     );
 
     pages.forEach((p, pageIndex) => {
@@ -1849,7 +1854,8 @@ function drawQuestions(
         hasBanglaFont,
         currentY,
         perPage,
-        paper.optionLabelStyle
+        paper.optionLabelStyle,
+        isSingleFlow
       );
 
       mcqPages.forEach((p, pageIndex) => {
@@ -1946,7 +1952,8 @@ function drawQuestions(
         hasBanglaFont,
         currentY,
         perPage,
-        paper.optionLabelStyle
+        paper.optionLabelStyle,
+        isSingleFlow
       );
 
       cqPages.forEach((p, pageIndex) => {
@@ -2113,8 +2120,8 @@ function drawQuestionCard(
         fontSize: 8.5,
         color: "#64748b"
       });
-      const itemH = Math.max(14, measurePdfText(doc, cleanItemText, width - indent - labelWidth - 44, 10, hasBanglaFont, false));
-      cursorY += itemH + 3;
+      const itemH = Math.max(13, measurePdfText(doc, cleanItemText, width - indent - labelWidth - 44, 10, hasBanglaFont, false));
+      cursorY += itemH + 2;
     });
   } else {
     const optionAreaWidth = width - indent;
@@ -2127,7 +2134,7 @@ function drawQuestionCard(
       const t2 = opt2 ? `${getOptionExportLabel(opt2, i + 1, optionLabelStyle, isBangla)} ${formatMathForExport(opt2.text)}` : "";
       const h1 = t1 ? measurePdfText(doc, t1, optionColWidth - 4, 10, hasBanglaFont, false) : 0;
       const h2 = t2 ? measurePdfText(doc, t2, optionColWidth - 4, 10, hasBanglaFont, false) : 0;
-      const rowHeight = Math.max(14, Math.max(h1, h2));
+      const rowHeight = Math.max(13, Math.max(h1, h2));
 
       if (t1) {
         drawPdfText(doc, t1, x + indent, cursorY, hasBanglaFont, { width: optionColWidth - 4, fontSize: 10 });
@@ -2135,12 +2142,12 @@ function drawQuestionCard(
       if (t2) {
         drawPdfText(doc, t2, x + indent + optionColWidth + 8, cursorY, hasBanglaFont, { width: optionColWidth - 4, fontSize: 10 });
       }
-      cursorY += rowHeight + 2;
+      cursorY += rowHeight + 1.5;
     }
   }
 
-  // Standard compact gap between question items: 8pt
-  return cursorY + 8;
+  // Standard compact gap between question items: 5pt
+  return cursorY + 5;
 }
 
 function drawAnswers(doc: PDFKit.PDFDocument, paper: Paper, hasBanglaFont: boolean) {

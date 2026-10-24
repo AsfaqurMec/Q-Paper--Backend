@@ -19,8 +19,8 @@ async function bootstrap() {
     deleteExpiredPapers().catch((err) => console.error("[Auto-Clean] Periodic cleanup error:", err));
   }, 60 * 60 * 1000);
 
-  app.listen(env.PORT, () => {
-    console.log(`ExamCraft API running on http://localhost:${env.PORT}`);
+  app.listen(env.PORT, "0.0.0.0", () => {
+    console.log(`ExamCraft API running on http://127.0.0.1:${env.PORT}`);
     startKeepAlive();
   });
 }

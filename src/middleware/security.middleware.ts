@@ -98,10 +98,31 @@ export function applySecurity(app: Express) {
     })
   );
 
-  // 2. Strict CORS policy
+  // 2. Strict CORS policy with development multi-origin support (app + landing page)
+  const allowedOrigins = [
+    env.CLIENT_URL,
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001"
+  ];
+
   app.use(
     cors({
-      origin: env.CLIENT_URL,
+      origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        if (env.NODE_ENV !== "production") {
+          try {
+            const host = new URL(origin).host;
+            if (host.startsWith("localhost:") || host.startsWith("127.0.0.1:")) {
+              return callback(null, true);
+            }
+          } catch {}
+        }
+        callback(null, false);
+      },
       credentials: true,
       exposedHeaders: ["Content-Disposition"]
     })

@@ -1,16 +1,11 @@
 import { Router } from "express";
-import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
-import Tesseract from "tesseract.js";
 import { z } from "zod";
 import { requireAuth } from "../../middleware/auth.middleware.js";
 import { ApiError, asyncHandler, ok, validate } from "../../utils/http.js";
 import { getPlan } from "../plans/plan.service.js";
-import type { ExtractedPage } from "./questionImport.chunker.js";
-import { parseMultimodalDocument, parseQuestionDocument } from "./questionImport.parser.js";
-import type { ParsedQuestion } from "./questionImport.schema.js";
-
-type ImportType = "image" | "pdf" | "docx";
+import { documentProcessingPipeline } from "./pipeline/documentPipeline.js";
+import { tempAssetStore } from "./pipeline/tempAssetStore.js";
+import type { QuestionAssemblyResult, ReviewedCorrection } from "./pipeline/types.js";
 
 const parseSchema = z.object({
   importType: z.enum(["image", "pdf", "docx"]),
@@ -26,130 +21,129 @@ const parseSchema = z.object({
     .max(10)
 });
 
+const feedbackSchema = z.object({
+  jobId: z.string().min(1),
+  questionId: z.string().min(1),
+  originalText: z.string(),
+  correctedText: z.string(),
+  originalType: z.string(),
+  correctedType: z.string(),
+  originalOptions: z.array(z.string()).optional(),
+  correctedOptions: z.array(z.string()).optional(),
+  cropAssetId: z.string().optional(),
+  modelVersion: z.string().default("q-paper-ml-v1.0")
+});
+
 export const questionImportRouter = Router();
 
 questionImportRouter.use(requireAuth);
 
+/**
+ * Main ML document parsing endpoint.
+ * Zero Generative AI / LLM API dependency.
+ * Outputs questions with protected temporary diagram crop references.
+ */
 questionImportRouter.post(
   "/parse",
   validate(parseSchema),
   asyncHandler(async (req, res) => {
     const plan = getPlan(req.user?.plan || "free");
     if (!plan.importQuestion && req.user?.role !== "admin") {
-      throw new ApiError(403, "The Question Import feature is only available in the Ultra and Diamond packages. Please upgrade your plan.");
+      throw new ApiError(
+        403,
+        "The Question Import feature is only available in the Ultra and Diamond packages. Please upgrade your plan."
+      );
     }
 
-    const started = Date.now();
     const input = req.body as z.infer<typeof parseSchema>;
 
-    let extractionPages: ExtractedPage[] = [];
-    const inheritedWarnings: string[] = [];
-
-    // For DOCX and PDF text fallback extraction
-    if (input.importType === "docx" || input.importType === "pdf") {
-      try {
-        const extraction = await extractFiles(input.importType, input.files);
-        extractionPages = extraction.pages;
-        inheritedWarnings.push(...extraction.warnings);
-      } catch (extractErr) {
-        console.warn(`[QuestionImport] Text extraction error for ${input.importType}:`, extractErr);
-      }
-    }
-
-    let parsed = await parseMultimodalDocument(input.importType, input.files, extractionPages);
-
-    // If 0 questions were parsed and importType was "image", run local Tesseract OCR fallback
-    if (parsed.questions.length === 0 && input.importType === "image") {
-      console.log("[QuestionImport] Image had 0 questions from Gemini, invoking Tesseract OCR fallback...");
-      try {
-        const ocrPages: ExtractedPage[] = [];
-        for (const file of input.files) {
-          const buffer = dataUrlToBuffer(file.dataUrl);
-          let ocrText = "";
-          try {
-            const res = await Tesseract.recognize(buffer, "ben+eng");
-            ocrText = res.data.text;
-          } catch {
-            const res = await Tesseract.recognize(buffer, "eng");
-            ocrText = res.data.text;
-          }
-          if (ocrText && ocrText.trim()) {
-            ocrPages.push({ pageNumber: ocrPages.length + 1, sourceName: file.name, text: ocrText.trim() });
-          }
-        }
-        if (ocrPages.length > 0) {
-          extractionPages = ocrPages;
-          parsed = await parseQuestionDocument(ocrPages, [
-            ...parsed.warnings,
-            "Document questions were extracted using on-device OCR fallback."
-          ]);
-        }
-      } catch (ocrErr) {
-        console.warn("[QuestionImport] Tesseract OCR fallback error:", ocrErr);
-      }
-    }
+    const pipelineResult = await documentProcessingPipeline.processDocument(
+      input.importType,
+      input.files,
+      { userId: req.user!.id }
+    );
 
     return ok(
       res,
       {
+        jobId: pipelineResult.jobId,
         importType: input.importType,
-        extractedText: extractionPages.map((page) => page.text).join("\n\n").trim(),
-        warnings: Array.from(new Set([...inheritedWarnings, ...parsed.warnings])),
-        metrics: {
-          ...parsed.metrics,
-          totalTimeMs: Date.now() - started
-        },
-        questions: parsed.questions.map(toClientQuestion)
+        extractedText: pipelineResult.questions.map((q) => q.title).join("\n\n").trim(),
+        warnings: pipelineResult.warnings,
+        metrics: pipelineResult.metrics,
+        validation: pipelineResult.validation,
+        questions: pipelineResult.questions.map((q, idx) =>
+          toClientQuestion(q, idx, pipelineResult.jobId)
+        )
       },
-      "Questions parsed"
+      "Questions parsed using ML Document Pipeline"
     );
   })
 );
 
-async function extractFiles(importType: ImportType, files: Array<{ name: string; dataUrl: string }>) {
-  const pages: ExtractedPage[] = [];
-  const warnings: string[] = [];
+/**
+ * Protected job-scoped asset endpoint.
+ * Serves temporary diagram crops without any Cloudinary upload during preview.
+ */
+questionImportRouter.get(
+  "/jobs/:jobId/assets/:assetId",
+  asyncHandler(async (req, res) => {
+    const jobId = String(req.params.jobId);
+    const assetId = String(req.params.assetId);
+    const asset = tempAssetStore.getAsset(jobId, assetId, req.user?.id);
 
-  for (const file of files) {
-    const buffer = dataUrlToBuffer(file.dataUrl);
-
-    if (importType === "docx") {
-      const result = await mammoth.extractRawText({ buffer });
-      pages.push({ pageNumber: pages.length + 1, sourceName: file.name, text: result.value });
-      warnings.push(...result.messages.map((message) => `${file.name}: ${message.message}`));
+    if (!asset) {
+      throw new ApiError(404, "Temporary visual asset not found or expired.");
     }
 
-    if (importType === "pdf") {
-      const extracted = await extractPdfPages(file.name, buffer);
-      pages.push(...extracted.pages.map((page) => ({ ...page, pageNumber: pages.length + page.pageNumber })));
-      warnings.push(...extracted.warnings);
-    }
+    res.setHeader("Content-Type", asset.mimeType || "image/png");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    return res.status(200).send(asset.buffer);
+  })
+);
 
-  }
+/**
+ * Phase Eleven: Reviewed Corrections Feedback API
+ * Captures verified human corrections to train and fine-tune subsequent model iterations.
+ */
+const reviewedCorrectionsStore: ReviewedCorrection[] = [];
 
-  return { pages: pages.filter((page) => page.text.trim()), warnings };
-}
+questionImportRouter.post(
+  "/feedback",
+  validate(feedbackSchema),
+  asyncHandler(async (req, res) => {
+    const input = req.body as z.infer<typeof feedbackSchema>;
+    const correction: ReviewedCorrection = {
+      id: `cor_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+      userId: req.user!.id,
+      jobId: input.jobId,
+      questionId: input.questionId,
+      originalText: input.originalText,
+      correctedText: input.correctedText,
+      originalType: input.originalType,
+      correctedType: input.correctedType,
+      originalOptions: input.originalOptions,
+      correctedOptions: input.correctedOptions,
+      cropAssetId: input.cropAssetId,
+      modelVersion: input.modelVersion,
+      timestamp: new Date().toISOString()
+    };
 
-async function extractPdfPages(sourceName: string, buffer: Buffer) {
-  const warnings: string[] = [];
-  const parser = new PDFParse({ data: buffer });
+    reviewedCorrectionsStore.push(correction);
 
-  try {
-    const result = await parser.getText();
-    const textPages = result.pages
-      .map((page) => ({ pageNumber: page.num, sourceName, text: page.text }))
-      .filter((page) => page.text.trim());
+    return ok(
+      res,
+      {
+        feedbackId: correction.id,
+        status: "recorded",
+        totalCorrectionsCollected: reviewedCorrectionsStore.length
+      },
+      "Reviewed correction recorded for model retraining"
+    );
+  })
+);
 
-    return { pages: textPages, warnings };
-  } catch (error) {
-    warnings.push(`${sourceName}: PDF extraction failed${error instanceof Error ? ` (${error.message})` : ""}`);
-    return { pages: [] as ExtractedPage[], warnings };
-  } finally {
-    await parser.destroy();
-  }
-}
-
-function toClientQuestion(question: ParsedQuestion, index: number) {
+function toClientQuestion(question: QuestionAssemblyResult, index: number, jobId: string) {
   const options = question.options.map((option) => String(option).trim()).filter(Boolean);
   const warnings = [...question.warnings];
   const isCq = question.type === "cq" || (question.subQuestions && question.subQuestions.length > 0);
@@ -170,11 +164,16 @@ function toClientQuestion(question: ParsedQuestion, index: number) {
     ? subQuestions.reduce((sum, sq) => sum + (sq.marks || 0), 0)
     : Number(question.marks ?? (isCq ? 10 : isWritten ? 5 : 1));
 
+  // If question has a temporary asset, make sure imageUrl points to protected endpoint
+  const imageUrl = question.temporaryAssetId
+    ? `/api/question-import/jobs/${jobId}/assets/${question.temporaryAssetId}`
+    : (question.imageUrl || "");
+
   return {
     id: `import_${Date.now()}_${index}_${Math.random().toString(16).slice(2)}`,
     title: question.title,
     subtitle: question.subtitle ?? "",
-    imageUrl: question.images[0] ?? "",
+    imageUrl,
     marks: totalMarks,
     options,
     correct: question.correct,
@@ -182,13 +181,10 @@ function toClientQuestion(question: ParsedQuestion, index: number) {
     warnings: Array.from(new Set(warnings)),
     type: isCq ? "cq" : isWritten ? "written" : "mcq",
     number: question.number,
-    images: question.images,
-    tables: question.tables,
-    subQuestions
+    images: imageUrl ? [imageUrl] : [],
+    tables: [],
+    subQuestions,
+    confidence: question.confidence,
+    reviewRequired: question.reviewRequired
   };
-}
-
-function dataUrlToBuffer(dataUrl: string) {
-  const [, base64 = ""] = dataUrl.split(",");
-  return Buffer.from(base64, "base64");
 }

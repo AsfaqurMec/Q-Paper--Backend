@@ -8,6 +8,7 @@ import { checkDeviceFreeLimit, recordDevicePaperCreation } from "../device/devic
 import type { Paper, PlanCode, Question } from "../shared/types.js";
 import { PaperModel } from "./paper.models.js";
 import { UserModel } from "../auth/auth.models.js";
+import { tempAssetStore } from "../question-import/pipeline/tempAssetStore.js";
 
 const now = () => new Date().toISOString();
 export const FORTY_FIVE_DAYS_MS = 45 * 24 * 60 * 60 * 1000;
@@ -166,9 +167,20 @@ export async function updatePaperQuestions(
     throw new ApiError(402, totalQuotaEnforcement.reason);
   }
 
+  // Resolve any temporary crop URLs to permanent Cloudinary URLs strictly upon save
+  const resolvedQuestions = await Promise.all(
+    questions.map(async (q) => {
+      if (q.imageUrl && q.imageUrl.includes("/api/question-import/jobs/")) {
+        const permanentUrl = await tempAssetStore.resolveTemporaryUrlOnSave(q.imageUrl, ownerId);
+        return { ...q, imageUrl: permanentUrl };
+      }
+      return q;
+    })
+  );
+
   const paper = await PaperModel.findOneAndUpdate(
     { id: paperId, ownerId },
-    { $set: { questions, updatedAt: now() } },
+    { $set: { questions: resolvedQuestions, updatedAt: now() } },
     { new: true, projection: { _id: 0 } }
   ).lean<Paper>();
   if (!paper) throw new ApiError(404, "Paper not found");

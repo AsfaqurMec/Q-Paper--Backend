@@ -37,7 +37,7 @@ export const plans: Plan[] = [
     watermark: true,
     questionBank: false,
     branding: false,
-    randomGenerator: false,
+    randomGenerator: true,
     multipleVersions: false,
     description: "সফটওয়্যার পরীক্ষা ও ফ্রি ট্রায়াল"
   },

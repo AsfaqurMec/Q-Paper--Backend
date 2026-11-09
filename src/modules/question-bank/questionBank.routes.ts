@@ -307,11 +307,8 @@ function checkQuestionBankAccess(planCode: string, role?: string) {
 }
 
 function checkRandomGeneratorAccess(planCode: string, role?: string) {
-  if (role === "admin") return;
-  const plan = getPlan(planCode as any);
-  if (!plan.randomGenerator) {
-    throw new ApiError(403, "Random Paper Generator requires a Small, Pro, Ultra, or Diamond package subscription. Please upgrade your package.");
-  }
+  // Question paper generator is accessible for all packages including free package
+  return;
 }
 
 // GET /api/question-bank/hierarchy - List classes -> subjects -> chapters with question counts

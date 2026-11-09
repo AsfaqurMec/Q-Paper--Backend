@@ -24,7 +24,7 @@ export const saveQuestionsSchema = z.object({
         number: z.string().max(20).optional(),
         title: z.string().min(1).max(1200),
         subtitle: z.string().max(500).optional(),
-        imageUrl: z.string().url().optional(),
+        imageUrl: z.string().max(2000).optional(),
         marks: z.coerce.number().min(0.25).max(100),
         explanation: z.string().max(2000).optional(),
         type: z.enum(["mcq", "cq"]).default("mcq"),
